@@ -68,8 +68,8 @@
             <div class="absolute bottom-0 left-0 right-0 py-3 bg-blue-900">
                 <div class="flex items-center justify-center">
                     <div class="text-center">
-                        <div class="font-medium">Desenvolvido por Bruno Assoni</div>
-                        <div class="text-xs text-blue-300">Programador BACK-END</div>
+                        <div class="font-medium">Sistema de Gestão Juristas</div>
+                        <div class="text-xs text-blue-300">Gestão de Clientes e Empréstimos</div>
                     </div>
                 </div>
             </div>
@@ -353,6 +353,8 @@
                         <p class="text-xs text-gray-500">Formatos aceitos: PDF, JPG, JPEG, PNG</p>
                         <p class="text-xs text-gray-400 mt-2">Arraste arquivos aqui ou clique para selecionar</p>
                     </div>
+                    <!-- Input hidden para o Uploadcare -->
+                    <input type="hidden" role="uploadcare-uploader" data-public-key="5bb6bf6b98f6d36060dc" data-multiple="true" data-multiple-max="10" data-multiple-min="1" data-locale="pt" data-preferred-types="image/*,application/pdf" data-image-preview-max-size="10485760" data-image-shrink="1024x1024" data-clearable="true" data-tabs="file url gdrive dropbox onedrive" data-input-accept-types=".pdf,.jpg,.jpeg,.png,.gif,.bmp,.tiff" />
                     <div id="uploaded-documents" class="mt-3 space-y-2"></div>
                 </div>
                 <div class="pt-2 flex space-x-3">
