@@ -35,6 +35,9 @@ document.addEventListener('DOMContentLoaded', function() {
     loadData();
     setupDragAndDrop();
     initializeUploadcare();
+    
+    // Verifica e corrige problemas na estrutura das tabelas
+    setTimeout(checkAndFixTableStructure, 2000);
 });
 
 function setupEventListeners() {
@@ -82,6 +85,9 @@ function setupEventListeners() {
     // Cálculo automático de juros
     document.getElementById('loan-amount').addEventListener('input', calculateLoanInterest);
     document.getElementById('loan-rate').addEventListener('input', calculateLoanInterest);
+    
+    // Atualização automática da data de pagamento quando a data do empréstimo mudar
+    document.getElementById('loan-date').addEventListener('change', updateDueDate);
 }
 
 function setupDragAndDrop() {
@@ -155,15 +161,39 @@ async function loadLoans() {
             `)
             .order('created_at', { ascending: false });
         
-        if (error) throw error;
+        if (error) {
+            console.error('Erro ao carregar empréstimos:', error);
+            
+            // Se o erro for relacionado ao campo due_date, tenta migrar a tabela
+            if (error.message && error.message.includes('due_date')) {
+                console.log('Campo due_date não encontrado, tentando migrar tabela...');
+                await migrateExistingLoans();
+                // Tenta carregar novamente
+                const { data: retryData, error: retryError } = await supabase
+                    .from('loans')
+                    .select(`
+                        *,
+                        clients(name, cpf)
+                    `)
+                    .order('created_at', { ascending: false });
+                
+                if (retryError) throw retryError;
+                loans = retryData || [];
+            } else {
+                throw error;
+            }
+        } else {
+            loans = data || [];
+        }
         
-        loans = data || [];
         renderLoans();
     } catch (error) {
         console.error('Erro ao carregar empréstimos:', error);
         if (error.code === 'PGRST116') {
             await createTables();
             await loadLoans();
+        } else {
+            showNotification('Erro ao carregar empréstimos. Tente recarregar a página.', 'error');
         }
     }
 }
@@ -221,6 +251,7 @@ async function createTables() {
                     interest_rate DECIMAL(5,2) NOT NULL,
                     final_amount DECIMAL(10,2) NOT NULL,
                     loan_date DATE NOT NULL,
+                    due_date DATE NOT NULL,
                     notes TEXT,
                     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'paid', 'cancelled')),
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -228,6 +259,25 @@ async function createTables() {
                 );
             `
         });
+        
+        // Adicionar coluna due_date se não existir (para tabelas existentes)
+        const { error: alterError } = await supabase.rpc('exec_sql', {
+            sql: `
+                DO $$ 
+                BEGIN 
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'loans' AND column_name = 'due_date'
+                    ) THEN 
+                        ALTER TABLE loans ADD COLUMN due_date DATE DEFAULT (loan_date + INTERVAL '30 days');
+                    END IF;
+                END $$;
+            `
+        });
+        
+        if (alterError) {
+            console.log('Erro ao alterar tabela loans (pode ser que a coluna já exista):', alterError);
+        }
         
         // Tabela de movimentações de caixa
         const { error: cashError } = await supabase.rpc('exec_sql', {
@@ -254,15 +304,71 @@ async function createTables() {
         console.log('addInitialData concluído');
         
     } catch (error) {
-        console.log('Usando fallback para criação de tabelas');
-        // Fallback: cria as tabelas usando SQL direto
-        await createTablesFallback();
+        console.log('Erro na criação de tabelas:', error);
+        
+        // Tenta criar as tabelas usando SQL direto como fallback
+        try {
+            await createTablesFallback();
+        } catch (fallbackError) {
+            console.error('Erro no fallback de criação de tabelas:', fallbackError);
+            showNotification('Erro crítico: Não foi possível criar as tabelas do sistema. Tente recarregar a página.', 'error');
+        }
     }
 }
 
 async function createTablesFallback() {
-    // Como fallback, vamos usar o localStorage para simular o banco
-    console.log('Usando localStorage como fallback');
+    console.log('Tentando criar tabelas usando método alternativo...');
+    
+    try {
+        // Tenta criar as tabelas usando SQL direto
+        const createLoansTable = `
+            CREATE TABLE IF NOT EXISTS loans (
+                id SERIAL PRIMARY KEY,
+                client_id INTEGER,
+                amount DECIMAL(10,2) NOT NULL,
+                interest_rate DECIMAL(5,2) NOT NULL,
+                final_amount DECIMAL(10,2) NOT NULL,
+                loan_date DATE NOT NULL,
+                due_date DATE,
+                notes TEXT,
+                status VARCHAR(20) DEFAULT 'active',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+        `;
+        
+        // Tenta executar o SQL diretamente
+        const { error } = await supabase.rpc('exec_sql', { sql: createLoansTable });
+        
+        if (error) {
+            console.log('Erro ao criar tabela loans via fallback:', error);
+            // Se ainda falhar, usa localStorage como último recurso
+            useLocalStorageFallback();
+        } else {
+            console.log('Tabela loans criada via fallback');
+        }
+        
+    } catch (error) {
+        console.error('Erro no fallback de criação de tabelas:', error);
+        useLocalStorageFallback();
+    }
+}
+
+function useLocalStorageFallback() {
+    console.log('Usando localStorage como último recurso');
+    
+    // Inicializa dados básicos no localStorage
+    if (!localStorage.getItem('juristas_loans')) {
+        localStorage.setItem('juristas_loans', JSON.stringify([]));
+    }
+    if (!localStorage.getItem('juristas_clients')) {
+        localStorage.setItem('juristas_clients', JSON.stringify([]));
+    }
+    if (!localStorage.getItem('juristas_cash_movements')) {
+        localStorage.setItem('juristas_cash_movements', JSON.stringify([]));
+    }
+    
+    showNotification('Sistema usando armazenamento local temporário. Algumas funcionalidades podem ser limitadas.', 'warning');
 }
 
 async function addInitialData() {
@@ -272,6 +378,52 @@ async function addInitialData() {
         await addCashMovement('income', 10000, 'Saldo inicial do sistema', new Date().toISOString().split('T')[0]);
     } else {
         console.log('Movimentações já existem, não adicionando saldo inicial');
+    }
+    
+    // Migrar dados existentes para incluir due_date
+    await migrateExistingLoans();
+}
+
+async function migrateExistingLoans() {
+    try {
+        console.log('Verificando se há empréstimos sem due_date...');
+        
+        // Buscar empréstimos sem due_date
+        const { data: loansWithoutDueDate, error: selectError } = await supabase
+            .from('loans')
+            .select('id, loan_date')
+            .is('due_date', null);
+        
+        if (selectError) {
+            console.log('Erro ao buscar empréstimos sem due_date:', selectError);
+            return;
+        }
+        
+        if (loansWithoutDueDate && loansWithoutDueDate.length > 0) {
+            console.log(`Encontrados ${loansWithoutDueDate.length} empréstimos sem due_date, atualizando...`);
+            
+            // Atualizar cada empréstimo para incluir due_date (30 dias após loan_date)
+            for (const loan of loansWithoutDueDate) {
+                const dueDate = new Date(loan.loan_date);
+                dueDate.setDate(dueDate.getDate() + 30);
+                
+                const { error: updateError } = await supabase
+                    .from('loans')
+                    .update({ due_date: dueDate.toISOString().split('T')[0] })
+                    .eq('id', loan.id);
+                
+                if (updateError) {
+                    console.error(`Erro ao atualizar empréstimo ${loan.id}:`, updateError);
+                }
+            }
+            
+            console.log('Migração de empréstimos concluída');
+        } else {
+            console.log('Todos os empréstimos já possuem due_date');
+        }
+        
+    } catch (error) {
+        console.error('Erro durante migração de empréstimos:', error);
     }
 }
 
@@ -367,6 +519,7 @@ function renderLoans() {
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${loan.interest_rate}%</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">${formatCurrency(loan.final_amount)}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatDate(loan.loan_date)}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatDate(loan.due_date)}</td>
             <td class="px-6 py-4 whitespace-nowrap">
                 <span class="px-2 py-1 text-xs rounded-full ${statusClass}">${statusText}</span>
             </td>
@@ -405,7 +558,8 @@ function renderLoans() {
                 </div>
                 <div>
                     <div class="font-medium">${clientName}</div>
-                    <div class="text-sm text-gray-500">${formatDate(loan.loan_date)}</div>
+                    <div class="text-sm text-gray-500">Empréstimo: ${formatDate(loan.loan_date)}</div>
+                    <div class="text-sm text-gray-500">Vencimento: ${formatDate(loan.due_date)}</div>
                     <div class="text-xs text-gray-400">${statusText}</div>
                 </div>
             </div>
@@ -720,6 +874,7 @@ function openLoanModal(loanId = null) {
             document.getElementById('loan-id').value = loan.id;
             document.getElementById('loan-client').value = loan.client_id;
             document.getElementById('loan-date').value = loan.loan_date;
+            document.getElementById('loan-due-date').value = loan.due_date || '';
             document.getElementById('loan-amount').value = loan.amount;
             document.getElementById('loan-rate').value = loan.interest_rate;
             document.getElementById('loan-notes').value = loan.notes || '';
@@ -731,7 +886,14 @@ function openLoanModal(loanId = null) {
         title.textContent = 'Novo Empréstimo';
         form.reset();
         document.getElementById('loan-id').value = '';
-        document.getElementById('loan-date').value = new Date().toISOString().split('T')[0];
+        const today = new Date();
+        document.getElementById('loan-date').value = today.toISOString().split('T')[0];
+        
+        // Define data de pagamento padrão como 30 dias após a data do empréstimo
+        const dueDate = new Date(today);
+        dueDate.setDate(today.getDate() + 30);
+        document.getElementById('loan-due-date').value = dueDate.toISOString().split('T')[0];
+        
         calculateLoanInterest();
     }
     
@@ -803,26 +965,63 @@ async function handleClientSubmit(e) {
 async function handleLoanSubmit(e) {
     e.preventDefault();
     
-    const loanData = {
-        client_id: parseInt(document.getElementById('loan-client').value),
-        amount: parseFloat(document.getElementById('loan-amount').value),
-        interest_rate: parseFloat(document.getElementById('loan-rate').value),
-        final_amount: parseFloat(document.getElementById('loan-amount').value) * (1 + parseFloat(document.getElementById('loan-rate').value) / 100),
-        loan_date: document.getElementById('loan-date').value,
-        notes: document.getElementById('loan-notes').value
-    };
-    
-    const loanId = document.getElementById('loan-id').value;
-    
     try {
+        // Validar campos obrigatórios
+        const clientId = document.getElementById('loan-client').value;
+        const loanDate = document.getElementById('loan-date').value;
+        const dueDate = document.getElementById('loan-due-date').value;
+        const amount = document.getElementById('loan-amount').value;
+        const rate = document.getElementById('loan-rate').value;
+        
+        if (!clientId || !loanDate || !dueDate || !amount || !rate) {
+            showNotification('Todos os campos obrigatórios devem ser preenchidos', 'error');
+            return;
+        }
+        
+        // Validação: data de pagamento deve ser posterior à data do empréstimo
+        if (dueDate <= loanDate) {
+            showNotification('A data de pagamento deve ser posterior à data do empréstimo', 'error');
+            return;
+        }
+        
+        // Validação: valores numéricos
+        const numericAmount = parseFloat(amount);
+        const numericRate = parseFloat(rate);
+        
+        if (isNaN(numericAmount) || numericAmount <= 0) {
+            showNotification('O valor do empréstimo deve ser um número positivo', 'error');
+            return;
+        }
+        
+        if (isNaN(numericRate) || numericRate < 0) {
+            showNotification('A taxa de juros deve ser um número não negativo', 'error');
+            return;
+        }
+        
+        const loanData = {
+            client_id: parseInt(clientId),
+            amount: numericAmount,
+            interest_rate: numericRate,
+            final_amount: numericAmount * (1 + numericRate / 100),
+            loan_date: loanDate,
+            due_date: dueDate,
+            notes: document.getElementById('loan-notes').value || ''
+        };
+        
+        const loanId = document.getElementById('loan-id').value;
+        
         if (loanId) {
             // Atualizar empréstimo existente
+            console.log('Atualizando empréstimo:', loanData);
             const { error } = await supabase
                 .from('loans')
                 .update(loanData)
                 .eq('id', loanId);
             
-            if (error) throw error;
+            if (error) {
+                console.error('Erro ao atualizar empréstimo:', error);
+                throw error;
+            }
             showNotification('Empréstimo atualizado com sucesso!', 'success');
         } else {
             // Verificar se há saldo suficiente
@@ -832,14 +1031,23 @@ async function handleLoanSubmit(e) {
             }
             
             // Criar novo empréstimo
+            console.log('Criando novo empréstimo:', loanData);
             const { error } = await supabase
                 .from('loans')
                 .insert([loanData]);
             
-            if (error) throw error;
+            if (error) {
+                console.error('Erro ao criar empréstimo:', error);
+                throw error;
+            }
             
             // Deduzir do caixa
-            await addCashMovement('expense', loanData.amount, `Empréstimo para cliente ID: ${loanData.client_id}`, loanData.loan_date);
+            try {
+                await addCashMovement('expense', loanData.amount, `Empréstimo para cliente ID: ${loanData.client_id}`, loanData.loan_date);
+            } catch (cashError) {
+                console.warn('Erro ao registrar movimentação de caixa:', cashError);
+                // Continua mesmo se falhar ao registrar no caixa
+            }
             
             showNotification('Empréstimo criado com sucesso!', 'success');
         }
@@ -847,9 +1055,26 @@ async function handleLoanSubmit(e) {
         await loadLoans();
         await loadCashMovements();
         closeLoanModal();
+        
     } catch (error) {
         console.error('Erro ao salvar empréstimo:', error);
-        showNotification('Erro ao salvar empréstimo', 'error');
+        
+        // Mensagens de erro mais específicas
+        let errorMessage = 'Erro ao salvar empréstimo';
+        
+        if (error.message) {
+            if (error.message.includes('due_date')) {
+                errorMessage = 'Erro: Campo de data de pagamento não encontrado. Tente recarregar a página.';
+            } else if (error.message.includes('client_id')) {
+                errorMessage = 'Erro: Cliente inválido selecionado.';
+            } else if (error.message.includes('amount')) {
+                errorMessage = 'Erro: Valor do empréstimo inválido.';
+            } else {
+                errorMessage = `Erro: ${error.message}`;
+            }
+        }
+        
+        showNotification(errorMessage, 'error');
     }
 }
 
@@ -922,6 +1147,21 @@ function calculateLoanInterest() {
     
     document.getElementById('loan-final-amount').textContent = formatCurrency(finalAmount);
     document.getElementById('loan-interest-amount').textContent = `Juros: ${formatCurrency(interestAmount)}`;
+}
+
+function updateDueDate() {
+    const loanDate = document.getElementById('loan-date').value;
+    if (loanDate) {
+        const dueDateInput = document.getElementById('loan-due-date');
+        const currentDueDate = dueDateInput.value;
+        
+        // Se não há data de pagamento definida ou se a data atual é anterior à nova data do empréstimo
+        if (!currentDueDate || currentDueDate <= loanDate) {
+            const dueDate = new Date(loanDate);
+            dueDate.setDate(dueDate.getDate() + 30); // 30 dias após a data do empréstimo
+            dueDateInput.value = dueDate.toISOString().split('T')[0];
+        }
+    }
 }
 
 function updateClientSelect() {
@@ -1421,11 +1661,12 @@ async function quitarEmprestimo(loanId) {
             return;
         }
         
-        // Atualizar status do empréstimo para 'paid'
+        // Atualizar status do empréstimo para 'paid' e registrar a data de pagamento
         const { error: updateError } = await supabase
             .from('loans')
             .update({ 
                 status: 'paid',
+                payment_date: new Date().toISOString().split('T')[0],
                 updated_at: new Date().toISOString()
             })
             .eq('id', loanId);
@@ -1788,4 +2029,48 @@ function checkStuckProgress() {
 }
 
 // Executa verificação de progressos travados a cada 5 segundos
-setInterval(checkStuckProgress, 5000); 
+setInterval(checkStuckProgress, 5000);
+
+// Função para verificar e corrigir problemas na estrutura das tabelas
+async function checkAndFixTableStructure() {
+    try {
+        console.log('Verificando estrutura das tabelas...');
+        
+        // Verifica se a tabela loans tem a coluna due_date
+        const { data: tableInfo, error: tableError } = await supabase
+            .from('loans')
+            .select('due_date')
+            .limit(1);
+        
+        if (tableError && tableError.message.includes('due_date')) {
+            console.log('Coluna due_date não encontrada, corrigindo...');
+            await migrateExistingLoans();
+            showNotification('Estrutura da tabela corrigida automaticamente', 'success');
+        }
+        
+    } catch (error) {
+        console.log('Verificação de estrutura concluída:', error);
+    }
+}
+
+// Função para forçar recriação das tabelas (botão de emergência)
+async function forceRecreateTables() {
+    if (!confirm('ATENÇÃO: Esta ação irá recriar todas as tabelas do sistema. Dados existentes podem ser perdidos. Deseja continuar?')) {
+        return;
+    }
+    
+    try {
+        showNotification('Recriando tabelas do sistema...', 'info');
+        
+        // Força recriação das tabelas
+        await createTables();
+        
+        // Recarrega todos os dados
+        await loadData();
+        
+        showNotification('Sistema recarregado com sucesso!', 'success');
+    } catch (error) {
+        console.error('Erro ao recriar tabelas:', error);
+        showNotification('Erro ao recriar tabelas. Tente recarregar a página.', 'error');
+    }
+} 
