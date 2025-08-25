@@ -1,7 +1,7 @@
 {
-  "name": "synapse-finance-backend",
+  "name": "xpcred-finance-backend",
   "version": "1.0.0",
-  "description": "Backend para Sistema de Gestão Financeira Synapse",
+  "description": "Backend para Sistema de Gestão Financeira XPCRED",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
@@ -9,7 +9,7 @@
     "test": "jest"
   },
   "keywords": ["finance", "management", "api", "supabase"],
-  "author": "Synapse Software e Tecnologia",
+  "author": "XPCRED",
   "license": "MIT",
   "dependencies": {
     "express": "^4.18.2",
