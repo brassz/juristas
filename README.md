@@ -1,4 +1,4 @@
-# 🚀 Synapse Finance - Sistema de Gestão Financeira
+# 🚀 Finance - Sistema de Gestão Financeira
 
 Sistema completo de gestão financeira com backend Node.js + Supabase e frontend moderno.
 
