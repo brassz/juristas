@@ -2,6 +2,9 @@
 const SUPABASE_URL = 'https://mhtxyxizfnxupwmilith.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1odHh5eGl6Zm54dXB3bWlsaXRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYxMzIzMDYsImV4cCI6MjA3MTcwODMwNn0.s1Y9kk2Va5EMcwAEGQmhTxo70Zv0o9oR6vrJixwEkWI';
 
+// Configuração do Uploadcare
+const UPLOADCARE_PUBLIC_KEY = '5bb6bf6b98f6d36060dc';
+
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Variáveis globais
@@ -96,20 +99,23 @@ function setupDragAndDrop() {
     uploadArea.addEventListener('drop', function(e) {
         e.preventDefault();
         this.classList.remove('dragover');
-        const files = e.dataTransfer.files;
-        handleDocumentUpload(files);
+        // Abre o Uploadcare quando arquivos são arrastados
+        openUploadcare();
     });
 }
 
 // Funções de carregamento de dados
 async function loadData() {
     try {
+        console.log('Iniciando carregamento de dados...');
         await Promise.all([
             loadClients(),
             loadLoans(),
             loadCashMovements()
         ]);
+        console.log('Dados carregados, atualizando dashboard...');
         updateDashboard();
+        console.log('Carregamento de dados concluído');
     } catch (error) {
         console.error('Erro ao carregar dados:', error);
         showNotification('Erro ao carregar dados', 'error');
@@ -171,6 +177,8 @@ async function loadCashMovements() {
         if (error) throw error;
         
         cashMovements = data || [];
+        console.log('Movimentações carregadas:', cashMovements);
+        
         calculateCashBalance();
         renderCashHistory();
     } catch (error) {
@@ -240,7 +248,9 @@ async function createTables() {
         }
         
         // Adiciona dados iniciais
+        console.log('Chamando addInitialData...');
         await addInitialData();
+        console.log('addInitialData concluído');
         
     } catch (error) {
         console.log('Usando fallback para criação de tabelas');
@@ -255,9 +265,12 @@ async function createTablesFallback() {
 }
 
 async function addInitialData() {
-    // Adiciona saldo inicial ao caixa
+    // Adiciona saldo inicial ao caixa apenas se não houver movimentações
     if (cashMovements.length === 0) {
+        console.log('Adicionando saldo inicial de R$ 10.000,00');
         await addCashMovement('income', 10000, 'Saldo inicial do sistema', new Date().toISOString().split('T')[0]);
+    } else {
+        console.log('Movimentações já existem, não adicionando saldo inicial');
     }
 }
 
@@ -290,8 +303,18 @@ function renderClients() {
             <td class="px-6 py-4 text-sm text-gray-900 max-w-xs truncate">${client.address}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                 ${client.documents && client.documents.length > 0 ? 
-                    `<span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">${client.documents.length} documento(s)</span>` : 
-                    '<span class="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">Sem documentos</span>'
+                    `<div class="flex items-center space-x-2">
+                        <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">${client.documents.length} documento(s)</span>
+                        <button class="text-blue-600 hover:text-blue-800 text-xs" onclick="viewClientDocuments(${client.id}, '${client.name}')">
+                            <i class="fas fa-eye mr-1"></i>Ver
+                        </button>
+                    </div>` : 
+                    `<div class="flex items-center space-x-2">
+                        <span class="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">Sem documentos</span>
+                        <button class="text-blue-600 hover:text-blue-800 text-xs" onclick="editClient(${client.id})">
+                            <i class="fas fa-plus mr-1"></i>Adicionar
+                        </button>
+                    </div>`
                 }
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
@@ -415,13 +438,16 @@ function renderCashHistory() {
 
 // Funções de atualização do dashboard
 function updateDashboard() {
+    console.log('Atualizando dashboard...');
     updateCashBalance();
     updateTotalReceivable();
     updateTotalClients();
     updateLoansSummary();
+    console.log('Dashboard atualizado');
 }
 
 function updateCashBalance() {
+    console.log('Atualizando saldo em caixa:', currentCashBalance);
     document.querySelector('.cash-balance').textContent = formatCurrency(currentCashBalance);
     document.querySelector('.cash-available').textContent = formatCurrency(currentCashBalance);
 }
@@ -462,6 +488,10 @@ function calculateCashBalance() {
             return balance - parseFloat(movement.amount);
         }
     }, 0);
+    
+    // Log para debug
+    console.log('Movimentações de caixa:', cashMovements);
+    console.log('Saldo calculado:', currentCashBalance);
 }
 
 // Funções de modal
@@ -498,6 +528,164 @@ function openClientModal(clientId = null) {
 
 function closeClientModal() {
     document.getElementById('client-modal').classList.add('hidden');
+}
+
+function openDocumentsModal() {
+    document.getElementById('documents-modal').classList.remove('hidden');
+}
+
+function closeDocumentsModal() {
+    document.getElementById('documents-modal').classList.add('hidden');
+    document.getElementById('documents-list').innerHTML = '';
+}
+
+function viewClientDocuments(clientId, clientName) {
+    const client = clients.find(c => c.id === clientId);
+    
+    // Atualiza o título do modal
+    document.getElementById('documents-modal-title').textContent = `Documentos de ${clientName}`;
+    
+    // Renderiza os documentos
+    const documentsContainer = document.getElementById('documents-list');
+    documentsContainer.innerHTML = '';
+    
+    if (!client || !client.documents || client.documents.length === 0) {
+        documentsContainer.innerHTML = `
+            <div class="text-center py-12">
+                <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <i class="fas fa-file-alt text-gray-400 text-2xl"></i>
+                </div>
+                <h3 class="text-lg font-medium text-gray-900 mb-2">Nenhum documento encontrado</h3>
+                <p class="text-gray-500 mb-4">Este cliente ainda não possui documentos anexados.</p>
+                <button class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition" onclick="closeDocumentsModal(); editClient(${clientId})">
+                    <i class="fas fa-plus mr-2"></i>Adicionar Documentos
+                </button>
+            </div>
+        `;
+    } else {
+        client.documents.forEach((doc, index) => {
+            const documentElement = document.createElement('div');
+            documentElement.className = 'flex items-center justify-between p-4 bg-gray-50 rounded-lg border';
+            documentElement.innerHTML = `
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                        <i class="fas fa-file-alt text-blue-600"></i>
+                    </div>
+                    <div>
+                        <div class="font-medium text-gray-900">${doc.name}</div>
+                        <div class="text-sm text-gray-500">Enviado em: ${formatDate(doc.uploaded_at)}</div>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button class="text-green-600 hover:text-green-800 px-3 py-1 rounded-lg border border-green-200 hover:bg-green-50 transition" onclick="previewDocument('${doc.name}', '${doc.type || ''}', '${doc.cdn_url || ''}')">
+                        <i class="fas fa-eye mr-1"></i>Preview
+                    </button>
+                    <a href="${doc.cdn_url || '#'}" target="_blank" class="text-blue-600 hover:text-blue-800 px-3 py-1 rounded-lg border border-blue-200 hover:bg-blue-50 transition">
+                        <i class="fas fa-download mr-1"></i>Download
+                    </a>
+                    <button class="text-red-600 hover:text-red-800 px-3 py-1 rounded-lg border border-red-200 hover:bg-red-50 transition" onclick="deleteDocument(${clientId}, ${index})">
+                        <i class="fas fa-trash mr-1"></i>Excluir
+                    </button>
+                </div>
+            `;
+            documentsContainer.appendChild(documentElement);
+        });
+        
+        // Adiciona botão para adicionar mais documentos
+        const addMoreButton = document.createElement('div');
+        addMoreButton.className = 'text-center pt-4 border-t border-gray-200';
+        addMoreButton.innerHTML = `
+            <button class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition" onclick="closeDocumentsModal(); editClient(${clientId})">
+                <i class="fas fa-plus mr-2"></i>Adicionar Mais Documentos
+            </button>
+        `;
+        documentsContainer.appendChild(addMoreButton);
+    }
+    
+    openDocumentsModal();
+}
+
+function downloadDocument(fileName, uploadedAt, cdnUrl) {
+    if (!cdnUrl || cdnUrl === '#') {
+        showNotification('URL do documento não disponível', 'error');
+        return;
+    }
+    
+    // Inicia o download do documento real
+    const link = document.createElement('a');
+    link.href = cdnUrl;
+    link.download = fileName;
+    link.target = '_blank';
+    link.click();
+    
+    showNotification(`Download iniciado para: ${fileName}`, 'success');
+}
+
+function previewDocument(fileName, fileType, cdnUrl) {
+    if (!cdnUrl || cdnUrl === '#') {
+        showNotification('URL do documento não disponível', 'error');
+        return;
+    }
+    
+    // Função para preview de documentos
+    if (fileType && fileType.startsWith('image/')) {
+        // Para imagens, abre em uma nova aba
+        window.open(cdnUrl, '_blank');
+        showNotification(`Abrindo imagem: ${fileName}`, 'success');
+    } else if (fileType && fileType.includes('pdf')) {
+        // Para PDFs, abre em uma nova aba
+        window.open(cdnUrl, '_blank');
+        showNotification(`Abrindo PDF: ${fileName}`, 'success');
+    } else {
+        // Para outros tipos de arquivo, inicia o download
+        const link = document.createElement('a');
+        link.href = cdnUrl;
+        link.download = fileName;
+        link.click();
+        showNotification(`Download iniciado: ${fileName}`, 'success');
+    }
+}
+
+async function deleteDocument(clientId, documentIndex) {
+    if (!confirm('Tem certeza que deseja excluir este documento?')) return;
+    
+    try {
+        const client = clients.find(c => c.id === clientId);
+        if (!client) throw new Error('Cliente não encontrado');
+        
+        const documentToDelete = client.documents[documentIndex];
+        
+        // Remove o documento do array
+        client.documents.splice(documentIndex, 1);
+        
+        // Atualiza o cliente no banco de dados
+        const { error } = await supabase
+            .from('clients')
+            .update({ documents: client.documents })
+            .eq('id', clientId);
+        
+        if (error) throw error;
+        
+        // Se o documento tem UUID, tenta removê-lo do Uploadcare também
+        if (documentToDelete && documentToDelete.uuid) {
+            try {
+                // Nota: Para remover do Uploadcare, você precisaria de uma API key privada
+                // Por enquanto, apenas logamos a tentativa
+                console.log('Documento removido do banco. UUID para remoção do Uploadcare:', documentToDelete.uuid);
+            } catch (uploadcareError) {
+                console.log('Não foi possível remover do Uploadcare (requer API key privada)');
+            }
+        }
+        
+        showNotification('Documento excluído com sucesso!', 'success');
+        
+        // Fecha o modal e recarrega a lista de clientes
+        closeDocumentsModal();
+        await loadClients();
+    } catch (error) {
+        console.error('Erro ao excluir documento:', error);
+        showNotification('Erro ao excluir documento', 'error');
+    }
 }
 
 function openLoanModal(loanId = null) {
@@ -670,6 +858,8 @@ async function handleCashSubmit(e) {
 // Funções auxiliares
 async function addCashMovement(type, amount, description, date) {
     try {
+        console.log('Adicionando movimentação:', { type, amount, description, date });
+        
         const { error } = await supabase
             .from('cash_movements')
             .insert([{
@@ -692,6 +882,8 @@ async function addCashMovement(type, amount, description, date) {
             responsible: 'Usuário',
             created_at: new Date().toISOString()
         });
+        
+        console.log('Movimentação adicionada localmente. Total de movimentações:', cashMovements.length);
         
         calculateCashBalance();
         updateDashboard();
@@ -725,35 +917,113 @@ function updateClientSelect() {
     });
 }
 
-function handleDocumentUpload(files) {
-    if (!files || files.length === 0) return;
+function openUploadcare() {
+    const widget = uploadcare.Widget('[role=uploadcare-uploader]', {
+        publicKey: UPLOADCARE_PUBLIC_KEY,
+        multiple: true,
+        multipleMax: 10,
+        multipleMin: 1,
+        locale: 'pt',
+        preferredTypes: ['image/*', 'application/pdf'],
+        imagePreviewMaxSize: 10 * 1024 * 1024, // 10MB
+        imageShrink: '1024x1024',
+        clearable: true,
+        tabs: 'file url gdrive dropbox onedrive',
+        inputAcceptTypes: '.pdf,.jpg,.jpeg,.png,.gif,.bmp,.tiff'
+    });
     
+    widget.onChange(function(fileInfo) {
+        if (fileInfo) {
+            if (fileInfo.cdnUrl) {
+                // Arquivo já foi enviado
+                addUploadedDocument(fileInfo);
+            } else {
+                // Arquivo está sendo enviado
+                showUploadProgress(fileInfo);
+            }
+        }
+    });
+    
+    widget.openDialog();
+}
+
+function addUploadedDocument(fileInfo) {
     const documentsContainer = document.getElementById('uploaded-documents');
     
-    Array.from(files).forEach(file => {
-        const documentElement = document.createElement('div');
-        documentElement.className = 'flex items-center justify-between p-2 bg-gray-50 rounded-lg';
-        documentElement.innerHTML = `
-            <div class="flex items-center">
-                <i class="fas fa-file text-blue-500 mr-2"></i>
-                <span class="text-sm text-gray-700">${file.name}</span>
+    const documentElement = document.createElement('div');
+    documentElement.className = 'flex items-center justify-between p-3 bg-gray-50 rounded-lg border';
+    documentElement.setAttribute('data-file-id', fileInfo.uuid);
+    documentElement.innerHTML = `
+        <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                <i class="fas fa-file-alt text-blue-600"></i>
             </div>
-            <button type="button" onclick="this.parentElement.remove()" class="text-red-500 hover:text-red-700">
-                <i class="fas fa-times"></i>
-            </button>
-        `;
-        documentsContainer.appendChild(documentElement);
-    });
+            <div>
+                <div class="font-medium text-gray-900 text-sm">${fileInfo.name || 'Documento'}</div>
+                <div class="text-xs text-gray-500">
+                    ${fileInfo.size ? formatFileSize(fileInfo.size) : 'N/A'} • 
+                    ${fileInfo.mimeType || 'Arquivo'}
+                </div>
+                <div class="text-xs text-green-600">✓ Enviado com sucesso</div>
+            </div>
+        </div>
+        <button type="button" onclick="removeUploadedDocument('${fileInfo.uuid}')" class="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50">
+            <i class="fas fa-times"></i>
+        </button>
+    `;
+    documentsContainer.appendChild(documentElement);
+    
+    showNotification('Documento enviado com sucesso!', 'success');
+}
+
+function showUploadProgress(fileInfo) {
+    const documentsContainer = document.getElementById('uploaded-documents');
+    
+    const progressElement = document.createElement('div');
+    progressElement.className = 'flex items-center justify-between p-3 bg-blue-50 rounded-lg border border-blue-200';
+    progressElement.setAttribute('data-file-id', fileInfo.uuid);
+    progressElement.innerHTML = `
+        <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                <i class="fas fa-spinner fa-spin text-blue-600"></i>
+            </div>
+            <div>
+                <div class="font-medium text-gray-900 text-sm">${fileInfo.name || 'Documento'}</div>
+                <div class="text-xs text-blue-600">Enviando...</div>
+            </div>
+        </div>
+        <div class="w-4 h-4 bg-blue-200 rounded-full"></div>
+    `;
+    documentsContainer.appendChild(progressElement);
+}
+
+function removeUploadedDocument(fileId) {
+    const element = document.querySelector(`[data-file-id="${fileId}"]`);
+    if (element) {
+        element.remove();
+        showNotification('Documento removido', 'info');
+    }
 }
 
 function getUploadedDocuments() {
     const documents = [];
-    const documentElements = document.querySelectorAll('#uploaded-documents > div');
+    const documentElements = document.querySelectorAll('#uploaded-documents > div[data-file-id]');
     
     documentElements.forEach(element => {
-        const fileName = element.querySelector('span').textContent;
+        const fileId = element.getAttribute('data-file-id');
+        const fileName = element.querySelector('.font-medium').textContent;
+        const fileInfo = element.querySelector('.text-xs').textContent;
+        
+        // Extrai informações do arquivo (tamanho e tipo)
+        const fileSizeMatch = fileInfo.match(/(\d+\.?\d*\s+\w+)/);
+        const fileTypeMatch = fileInfo.match(/•\s*(.+)$/);
+        
         documents.push({
+            uuid: fileId,
             name: fileName,
+            size: fileSizeMatch ? fileSizeMatch[1] : 'N/A',
+            type: fileTypeMatch ? fileTypeMatch[1] : 'Arquivo',
+            cdn_url: `https://ucarecdn.com/${fileId}/`,
             uploaded_at: new Date().toISOString()
         });
     });
@@ -767,13 +1037,22 @@ function renderUploadedDocuments(documents) {
     
     documents.forEach(doc => {
         const documentElement = document.createElement('div');
-        documentElement.className = 'flex items-center justify-between p-2 bg-gray-50 rounded-lg';
+        documentElement.className = 'flex items-center justify-between p-3 bg-gray-50 rounded-lg border';
+        documentElement.setAttribute('data-file-id', doc.uuid || doc.name);
         documentElement.innerHTML = `
-            <div class="flex items-center">
-                <i class="fas fa-file text-blue-500 mr-2"></i>
-                <span class="text-sm text-gray-700">${doc.name}</span>
+            <div class="flex items-center space-x-3">
+                <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <i class="fas fa-file-alt text-blue-600"></i>
+                </div>
+                <div>
+                    <div class="font-medium text-gray-900 text-sm">${doc.name}</div>
+                    <div class="text-xs text-gray-500">
+                        ${doc.size && doc.size !== 'N/A' ? `${doc.size} • ` : ''}Enviado em: ${formatDate(doc.uploaded_at)}
+                    </div>
+                    <div class="text-xs text-green-600">✓ Documento salvo</div>
+                </div>
             </div>
-            <button type="button" onclick="this.parentElement.remove()" class="text-red-500 hover:text-red-700">
+            <button type="button" onclick="removeUploadedDocument('${doc.uuid || doc.name}')" class="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50">
                 <i class="fas fa-times"></i>
             </button>
         `;
@@ -841,6 +1120,16 @@ function formatDate(dateString) {
     return date.toLocaleDateString('pt-BR');
 }
 
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 // Funções de notificação
 function showNotification(message, type = 'info') {
     const notification = document.createElement('div');
@@ -894,6 +1183,8 @@ if (typeof window.supabase === 'undefined') {
 
 // Adiciona animações e funcionalidades interativas
 function addInteractiveFeatures() {
+    console.log('Adicionando funcionalidades interativas...');
+    
     // Adiciona efeito de hover nos cards do dashboard
     const dashboardCards = document.querySelectorAll('.dashboard-card');
     dashboardCards.forEach(card => {
@@ -941,20 +1232,28 @@ function addInteractiveFeatures() {
     }
     
     // Adiciona contador animado nos números do dashboard
+    console.log('Iniciando animação dos números...');
     animateNumbers();
+    console.log('Funcionalidades interativas adicionadas');
 }
 
 function animateNumbers() {
     const numberElements = document.querySelectorAll('.cash-balance, .total-receivable, .total-clients');
+    console.log('Elementos encontrados para animação:', numberElements.length);
     
-    numberElements.forEach(element => {
+    numberElements.forEach((element, index) => {
         const finalValue = element.textContent;
         const isCurrency = finalValue.includes('R$');
         const numericValue = isCurrency ? 
             parseFloat(finalValue.replace(/[^\d,.-]/g, '').replace(',', '.')) : 
             parseInt(finalValue);
         
-        if (!isNaN(numericValue)) {
+        console.log(`Elemento ${index}: valor="${finalValue}", numérico=${numericValue}, é moeda=${isCurrency}`);
+        
+        // Só anima se o valor for maior que zero e não for NaN
+        if (!isNaN(numericValue) && numericValue > 0) {
+            console.log(`Animando elemento ${index} de 0 até ${numericValue}`);
+            const originalText = element.textContent;
             element.textContent = isCurrency ? 'R$ 0,00' : '0';
             
             let currentValue = 0;
@@ -964,19 +1263,28 @@ function animateNumbers() {
                 if (currentValue >= numericValue) {
                     currentValue = numericValue;
                     clearInterval(timer);
-                }
-                
-                if (isCurrency) {
-                    element.textContent = formatCurrency(currentValue);
+                    // Garante que o valor final seja exato
+                    element.textContent = originalText;
+                    console.log(`Animação concluída para elemento ${index}: ${originalText}`);
                 } else {
-                    element.textContent = Math.floor(currentValue);
+                    if (isCurrency) {
+                        element.textContent = formatCurrency(currentValue);
+                    } else {
+                        element.textContent = Math.floor(currentValue);
+                    }
                 }
             }, 50);
+        } else {
+            console.log(`Elemento ${index} não será animado (valor=${numericValue})`);
         }
     });
 }
 
 // Inicializa funcionalidades interativas quando a página carregar
 document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(addInteractiveFeatures, 1000);
+    console.log('DOM carregado, aguardando 1 segundo para adicionar funcionalidades interativas...');
+    setTimeout(() => {
+        console.log('Timeout concluído, chamando addInteractiveFeatures...');
+        addInteractiveFeatures();
+    }, 1000);
 }); 
