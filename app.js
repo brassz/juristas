@@ -222,7 +222,7 @@ async function createTables() {
                     final_amount DECIMAL(10,2) NOT NULL,
                     loan_date DATE NOT NULL,
                     notes TEXT,
-                    status VARCHAR(20) DEFAULT 'active',
+                    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'paid', 'cancelled')),
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
                 );
@@ -347,8 +347,10 @@ function renderLoans() {
     loans.forEach(loan => {
         const row = document.createElement('tr');
         const clientName = loan.clients ? loan.clients.name : 'Cliente não encontrado';
-        const statusClass = loan.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
-        const statusText = loan.status === 'active' ? 'Ativo' : 'Quitado';
+        const statusClass = loan.status === 'active' ? 'bg-green-100 text-green-800' : 
+                           loan.status === 'paid' ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800';
+        const statusText = loan.status === 'active' ? 'Ativo' : 
+                          loan.status === 'paid' ? 'Quitado' : 'Cancelado';
         
         row.innerHTML = `
             <td class="px-6 py-4 whitespace-nowrap">
@@ -369,10 +371,15 @@ function renderLoans() {
                 <span class="px-2 py-1 text-xs rounded-full ${statusClass}">${statusText}</span>
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                <button class="text-blue-600 hover:text-blue-900 mr-3" onclick="editLoan(${loan.id})">
+                ${loan.status === 'active' ? `
+                    <button class="text-green-600 hover:text-green-900 mr-3" onclick="quitarEmprestimo(${loan.id})" title="Quitar Empréstimo">
+                        <i class="fas fa-check-circle"></i>
+                    </button>
+                ` : ''}
+                <button class="text-blue-600 hover:text-blue-900 mr-3" onclick="editLoan(${loan.id})" title="Editar">
                     <i class="fas fa-edit"></i>
                 </button>
-                <button class="text-red-600 hover:text-red-900" onclick="deleteLoan(${loan.id})">
+                <button class="text-red-600 hover:text-red-900" onclick="deleteLoan(${loan.id})" title="Excluir">
                     <i class="fas fa-trash"></i>
                 </button>
             </td>
@@ -385,16 +392,21 @@ function renderLoans() {
     const recentLoans = loans.slice(0, 3);
     recentLoans.forEach(loan => {
         const clientName = loan.clients ? loan.clients.name : 'Cliente não encontrado';
+        const statusIcon = loan.status === 'active' ? 'fas fa-hand-holding-usd' : 'fas fa-check-circle';
+        const statusColor = loan.status === 'active' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600';
+        const statusText = loan.status === 'active' ? 'Ativo' : 'Quitado';
+        
         const loanElement = document.createElement('div');
         loanElement.className = 'flex justify-between items-center p-3 bg-gray-50 rounded-lg';
         loanElement.innerHTML = `
             <div class="flex items-center">
-                <div class="w-8 h-8 rounded-full bg-green-100 text-green-600 flex items-center justify-center mr-3">
-                    <i class="fas fa-hand-holding-usd"></i>
+                <div class="w-8 h-8 rounded-full ${statusColor} flex items-center justify-center mr-3">
+                    <i class="${statusIcon}"></i>
                 </div>
                 <div>
                     <div class="font-medium">${clientName}</div>
                     <div class="text-sm text-gray-500">${formatDate(loan.loan_date)}</div>
+                    <div class="text-xs text-gray-400">${statusText}</div>
                 </div>
             </div>
             <div class="text-right">
@@ -468,13 +480,17 @@ function updateTotalClients() {
 
 function updateLoansSummary() {
     const activeLoans = loans.filter(loan => loan.status === 'active');
-    const totalInterest = loans.reduce((sum, loan) => {
+    const paidLoans = loans.filter(loan => loan.status === 'paid');
+    
+    // Calcula juros recebidos apenas de empréstimos quitados
+    const totalInterest = paidLoans.reduce((sum, loan) => {
         const interest = parseFloat(loan.final_amount) - parseFloat(loan.amount);
         return sum + interest;
     }, 0);
     
-    const averageRate = loans.length > 0 ? 
-        loans.reduce((sum, loan) => sum + parseFloat(loan.interest_rate), 0) / loans.length : 0;
+    // Calcula taxa média apenas de empréstimos ativos
+    const averageRate = activeLoans.length > 0 ? 
+        activeLoans.reduce((sum, loan) => sum + parseFloat(loan.interest_rate), 0) / activeLoans.length : 0;
     
     document.querySelector('.loans-made').textContent = loans.length;
     document.querySelector('.interest-received').textContent = formatCurrency(totalInterest);
@@ -1379,6 +1395,69 @@ async function deleteLoan(loanId) {
     } catch (error) {
         console.error('Erro ao excluir empréstimo:', error);
         showNotification('Erro ao excluir empréstimo', 'error');
+    }
+}
+
+async function quitarEmprestimo(loanId) {
+    if (!confirm('Tem certeza que deseja quitar este empréstimo? Esta ação não pode ser desfeita.')) return;
+    
+    try {
+        // Buscar informações do empréstimo
+        const { data: loanData, error: loanError } = await supabase
+            .from('loans')
+            .select('*, clients(*)')
+            .eq('id', loanId)
+            .single();
+        
+        if (loanError) throw loanError;
+        
+        if (!loanData) {
+            showNotification('Empréstimo não encontrado', 'error');
+            return;
+        }
+        
+        if (loanData.status !== 'active') {
+            showNotification('Este empréstimo já foi quitado', 'error');
+            return;
+        }
+        
+        // Atualizar status do empréstimo para 'paid'
+        const { error: updateError } = await supabase
+            .from('loans')
+            .update({ 
+                status: 'paid',
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', loanId);
+        
+        if (updateError) throw updateError;
+        
+        // Adicionar entrada no caixa (pagamento recebido)
+        const { error: cashError } = await supabase
+            .from('cash_movements')
+            .insert({
+                type: 'income',
+                amount: loanData.final_amount,
+                description: `Pagamento do empréstimo - ${loanData.clients.name}`,
+                movement_date: new Date().toISOString().split('T')[0],
+                responsible: 'Sistema'
+            });
+        
+        if (cashError) {
+            console.warn('Erro ao registrar movimentação de caixa:', cashError);
+            // Continua mesmo se falhar ao registrar no caixa
+        }
+        
+        showNotification('Empréstimo quitado com sucesso!', 'success');
+        
+        // Recarregar dados
+        await loadLoans();
+        await loadCashMovements();
+        updateDashboard();
+        
+    } catch (error) {
+        console.error('Erro ao quitar empréstimo:', error);
+        showNotification('Erro ao quitar empréstimo', 'error');
     }
 }
 
