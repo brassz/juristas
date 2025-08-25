@@ -119,11 +119,7 @@ async function loadClients() {
         updateClientSelect();
     } catch (error) {
         console.error('Erro ao carregar clientes:', error);
-        // Se a tabela não existir, cria com dados de exemplo
-        if (error.code === 'PGRST116') {
-            await createTables();
-            await loadClients();
-        }
+        showNotification('Erro ao carregar clientes', 'error');
     }
 }
 
@@ -133,7 +129,7 @@ async function loadLoans() {
             .from('loans')
             .select(`
                 *,
-                clients(name, cpf)
+                clients(name, email, phone)
             `)
             .order('created_at', { ascending: false });
         
@@ -143,31 +139,35 @@ async function loadLoans() {
         renderLoans();
     } catch (error) {
         console.error('Erro ao carregar empréstimos:', error);
-        if (error.code === 'PGRST116') {
-            await createTables();
-            await loadLoans();
-        }
+        showNotification('Erro ao carregar empréstimos', 'error');
     }
 }
 
 async function loadCashMovements() {
     try {
         const { data, error } = await supabase
-            .from('cash_movements')
+            .from('transactions')
             .select('*')
             .order('created_at', { ascending: false });
         
         if (error) throw error;
         
-        cashMovements = data || [];
+        // Mapeia os dados para o formato esperado pelo código
+        cashMovements = (data || []).map(transaction => ({
+            id: transaction.id,
+            type: transaction.type,
+            amount: transaction.amount,
+            description: transaction.description,
+            movement_date: transaction.date,
+            responsible: 'Usuário',
+            created_at: transaction.created_at
+        }));
+        
         calculateCashBalance();
         renderCashHistory();
     } catch (error) {
         console.error('Erro ao carregar movimentações:', error);
-        if (error.code === 'PGRST116') {
-            await createTables();
-            await loadCashMovements();
-        }
+        showNotification('Erro ao carregar movimentações de caixa', 'error');
     }
 }
 
@@ -273,7 +273,7 @@ function renderClients() {
                     </div>
                 </div>
             </td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${client.cpf}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${client.document}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${client.email}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${client.phone}</td>
             <td class="px-6 py-4 text-sm text-gray-900 max-w-xs truncate">${client.address}</td>
@@ -328,8 +328,8 @@ function renderLoans() {
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatCurrency(loan.amount)}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${loan.interest_rate}%</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">${formatCurrency(loan.final_amount)}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatDate(loan.loan_date)}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">${formatCurrency(loan.amount * (1 + loan.interest_rate / 100))}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatDate(loan.start_date)}</td>
             <td class="px-6 py-4 whitespace-nowrap">
                 <span class="px-2 py-1 text-xs rounded-full ${statusClass}">${statusText}</span>
             </td>
@@ -359,11 +359,11 @@ function renderLoans() {
                 </div>
                 <div>
                     <div class="font-medium">${clientName}</div>
-                    <div class="text-sm text-gray-500">${formatDate(loan.loan_date)}</div>
+                    <div class="text-sm text-gray-500">${formatDate(loan.start_date)}</div>
                 </div>
             </div>
             <div class="text-right">
-                <div class="font-medium text-green-600">${formatCurrency(loan.final_amount)}</div>
+                <div class="font-medium text-green-600">${formatCurrency(loan.amount * (1 + loan.interest_rate / 100))}</div>
                 <div class="text-sm text-gray-500">${loan.interest_rate}% juros</div>
             </div>
         `;
@@ -418,7 +418,7 @@ function updateCashBalance() {
 function updateTotalReceivable() {
     const totalReceivable = loans
         .filter(loan => loan.status === 'active')
-        .reduce((sum, loan) => sum + parseFloat(loan.final_amount), 0);
+        .reduce((sum, loan) => sum + parseFloat(loan.amount * (1 + loan.interest_rate / 100)), 0);
     
     document.querySelector('.total-receivable').textContent = formatCurrency(totalReceivable);
     document.querySelector('.total-receivable-cash').textContent = formatCurrency(totalReceivable);
@@ -431,7 +431,7 @@ function updateTotalClients() {
 function updateLoansSummary() {
     const activeLoans = loans.filter(loan => loan.status === 'active');
     const totalInterest = loans.reduce((sum, loan) => {
-        const interest = parseFloat(loan.final_amount) - parseFloat(loan.amount);
+        const interest = parseFloat(loan.amount * (1 + loan.interest_rate / 100)) - parseFloat(loan.amount);
         return sum + interest;
     }, 0);
     
@@ -466,7 +466,7 @@ function openClientModal(clientId = null) {
             title.textContent = 'Editar Cliente';
             document.getElementById('client-id').value = client.id;
             document.getElementById('client-name').value = client.name;
-            document.getElementById('client-cpf').value = client.cpf;
+            document.getElementById('client-cpf').value = client.document;
             document.getElementById('client-email').value = client.email;
             document.getElementById('client-phone').value = client.phone;
             document.getElementById('client-address').value = client.address;
@@ -501,10 +501,10 @@ function openLoanModal(loanId = null) {
             title.textContent = 'Editar Empréstimo';
             document.getElementById('loan-id').value = loan.id;
             document.getElementById('loan-client').value = loan.client_id;
-            document.getElementById('loan-date').value = loan.loan_date;
+            document.getElementById('loan-date').value = loan.start_date;
             document.getElementById('loan-amount').value = loan.amount;
             document.getElementById('loan-rate').value = loan.interest_rate;
-            document.getElementById('loan-notes').value = loan.notes || '';
+            document.getElementById('loan-notes').value = loan.description || '';
             
             calculateLoanInterest();
         }
@@ -545,11 +545,11 @@ async function handleClientSubmit(e) {
     
     const clientData = {
         name: document.getElementById('client-name').value,
-        cpf: document.getElementById('client-cpf').value,
+        document: document.getElementById('client-cpf').value,
         email: document.getElementById('client-email').value,
         phone: document.getElementById('client-phone').value,
         address: document.getElementById('client-address').value,
-        documents: getUploadedDocuments()
+        notes: getUploadedDocuments().map(doc => doc.name).join(', ')
     };
     
     const clientId = document.getElementById('client-id').value;
@@ -586,12 +586,12 @@ async function handleLoanSubmit(e) {
     e.preventDefault();
     
     const loanData = {
-        client_id: parseInt(document.getElementById('loan-client').value),
+        client_id: document.getElementById('loan-client').value,
         amount: parseFloat(document.getElementById('loan-amount').value),
         interest_rate: parseFloat(document.getElementById('loan-rate').value),
-        final_amount: parseFloat(document.getElementById('loan-amount').value) * (1 + parseFloat(document.getElementById('loan-rate').value) / 100),
-        loan_date: document.getElementById('loan-date').value,
-        notes: document.getElementById('loan-notes').value
+        start_date: document.getElementById('loan-date').value,
+        due_date: calculateDueDate(document.getElementById('loan-date').value, parseFloat(document.getElementById('loan-rate').value)),
+        description: document.getElementById('loan-notes').value || null
     };
     
     const loanId = document.getElementById('loan-id').value;
@@ -614,14 +614,18 @@ async function handleLoanSubmit(e) {
             }
             
             // Criar novo empréstimo
-            const { error } = await supabase
+            const { data, error } = await supabase
                 .from('loans')
-                .insert([loanData]);
+                .insert([loanData])
+                .select();
             
-            if (error) throw error;
+            if (error) {
+                console.error('Erro detalhado:', error);
+                throw error;
+            }
             
             // Deduzir do caixa
-            await addCashMovement('expense', loanData.amount, `Empréstimo para cliente ID: ${loanData.client_id}`, loanData.loan_date);
+            await addCashMovement('expense', loanData.amount, `Empréstimo para cliente ID: ${loanData.client_id}`, loanData.start_date);
             
             showNotification('Empréstimo criado com sucesso!', 'success');
         }
@@ -631,7 +635,7 @@ async function handleLoanSubmit(e) {
         closeLoanModal();
     } catch (error) {
         console.error('Erro ao salvar empréstimo:', error);
-        showNotification('Erro ao salvar empréstimo', 'error');
+        showNotification(`Erro ao salvar empréstimo: ${error.message}`, 'error');
     }
 }
 
@@ -660,13 +664,14 @@ async function handleCashSubmit(e) {
 async function addCashMovement(type, amount, description, date) {
     try {
         const { error } = await supabase
-            .from('cash_movements')
+            .from('transactions')
             .insert([{
                 type,
                 amount,
                 description,
-                movement_date: date,
-                responsible: 'Usuário'
+                category: type === 'income' ? 'Entradas' : 'Saídas',
+                date,
+                created_at: new Date().toISOString()
             }]);
         
         if (error) throw error;
@@ -702,6 +707,16 @@ function calculateLoanInterest() {
     document.getElementById('loan-interest-amount').textContent = `Juros: ${formatCurrency(interestAmount)}`;
 }
 
+function calculateDueDate(startDate, interestRate) {
+    // Calcula a data de vencimento baseada na taxa de juros
+    // Por padrão, define como 30 dias após a data de início
+    const start = new Date(startDate);
+    const dueDate = new Date(start);
+    dueDate.setDate(start.getDate() + 30);
+    
+    return dueDate.toISOString().split('T')[0];
+}
+
 function updateClientSelect() {
     const select = document.getElementById('loan-client');
     select.innerHTML = '<option value="">Selecione um cliente</option>';
@@ -709,7 +724,7 @@ function updateClientSelect() {
     clients.forEach(client => {
         const option = document.createElement('option');
         option.value = client.id;
-        option.textContent = `${client.name} - ${client.cpf}`;
+        option.textContent = `${client.name} - ${client.email}`;
         select.appendChild(option);
     });
 }
