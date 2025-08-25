@@ -43,7 +43,7 @@ app.use(morgan('combined'));
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'OK',
-    message: 'Synapse Finance API is running',
+    message: 'XPCRED Finance API is running',
     timestamp: new Date().toISOString(),
     version: '1.0.0'
   });
@@ -75,7 +75,7 @@ app.use((err, req, res, next) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Synapse Finance API running on port ${PORT}`);
+  console.log(`🚀 XPCRED Finance API running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`🔗 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
