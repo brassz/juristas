@@ -19,14 +19,16 @@ const sections = {
     dashboard: document.getElementById('dashboard-section'),
     clients: document.getElementById('clients-section'),
     loans: document.getElementById('loans-section'),
-    cash: document.getElementById('cash-section')
+    cash: document.getElementById('cash-section'),
+    installments: document.getElementById('installments-section')
 };
 
 const sectionTitles = {
     dashboard: 'Dashboard',
     clients: 'Gestão de Clientes',
     loans: 'Gestão de Empréstimos',
-    cash: 'Caixa'
+    cash: 'Caixa',
+    installments: 'Gestão de Parcelamento - Empréstimos Vencidos'
 };
 
 // Inicialização
@@ -59,7 +61,8 @@ function setupEventListeners() {
             const sectionId = this.classList.contains('active-dashboard') ? 'dashboard' :
                               this.classList.contains('active-clients') ? 'clients' :
                               this.classList.contains('active-loans') ? 'loans' :
-                              this.classList.contains('active-cash') ? 'cash' : 'dashboard';
+                              this.classList.contains('active-cash') ? 'cash' :
+                              this.classList.contains('active-installments') ? 'installments' : 'dashboard';
             
             sections[sectionId].classList.remove('hidden');
             document.querySelector('.section-title').textContent = sectionTitles[sectionId];
@@ -81,6 +84,8 @@ function setupEventListeners() {
     document.getElementById('client-form').addEventListener('submit', handleClientSubmit);
     document.getElementById('loan-form').addEventListener('submit', handleLoanSubmit);
     document.getElementById('cash-form').addEventListener('submit', handleCashSubmit);
+    document.getElementById('payment-form').addEventListener('submit', handlePaymentSubmit);
+    document.getElementById('installment-form').addEventListener('submit', handleInstallmentSubmit);
     
     // Cálculo automático de juros
     document.getElementById('loan-amount').addEventListener('input', calculateLoanInterest);
@@ -88,6 +93,10 @@ function setupEventListeners() {
     
     // Atualização automática da data de pagamento quando a data do empréstimo mudar
     document.getElementById('loan-date').addEventListener('change', updateDueDate);
+    
+    // Event listeners para parcelamento
+    document.getElementById('payment-loan').addEventListener('change', updatePaymentRemaining);
+    document.getElementById('payment-amount').addEventListener('input', updatePaymentRemaining);
 }
 
 function setupDragAndDrop() {
@@ -120,6 +129,8 @@ async function loadData() {
             loadLoans(),
             loadCashMovements()
         ]);
+        // Carrega dados de parcelamento após os empréstimos
+        await loadInstallmentsData();
         console.log('Dados carregados, atualizando dashboard...');
         updateDashboard();
         console.log('Carregamento de dados concluído');
@@ -221,6 +232,28 @@ async function loadCashMovements() {
     }
 }
 
+// Função para carregar dados de parcelamento
+async function loadInstallmentsData() {
+    try {
+        // Filtra apenas empréstimos vencidos para parcelamento
+        const overdueLoans = loans.filter(loan => {
+            const isOverdue = new Date(loan.due_date) < new Date();
+            return loan.status === 'active' && isOverdue;
+        });
+        
+        // Atualiza a lista de empréstimos para pagamento (mantém todos os ativos para o modal de pagamento)
+        const activeLoans = loans.filter(loan => loan.status === 'active');
+        updatePaymentLoanSelect(activeLoans);
+        
+        // Renderiza a lista de parcelamento apenas com empréstimos vencidos
+        renderInstallments(overdueLoans);
+        
+        console.log('Dados de parcelamento carregados:', overdueLoans.length, 'empréstimos vencidos');
+    } catch (error) {
+        console.error('Erro ao carregar dados de parcelamento:', error);
+    }
+}
+
 // Criação das tabelas no Supabase
 async function createTables() {
     try {
@@ -252,8 +285,10 @@ async function createTables() {
                     final_amount DECIMAL(10,2) NOT NULL,
                     loan_date DATE NOT NULL,
                     due_date DATE NOT NULL,
+                    payment_date DATE,
+                    payment_amount DECIMAL(10,2),
                     notes TEXT,
-                    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'paid', 'cancelled')),
+                    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'paid', 'cancelled', 'overdue')),
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
                 );
@@ -277,6 +312,32 @@ async function createTables() {
         
         if (alterError) {
             console.log('Erro ao alterar tabela loans (pode ser que a coluna já exista):', alterError);
+        }
+        
+        // Adicionar colunas de pagamento se não existirem
+        const { error: paymentColumnsError } = await supabase.rpc('exec_sql', {
+            sql: `
+                DO $$ 
+                BEGIN 
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'loans' AND column_name = 'payment_date'
+                    ) THEN 
+                        ALTER TABLE loans ADD COLUMN payment_date DATE;
+                    END IF;
+                    
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name = 'loans' AND column_name = 'payment_amount'
+                    ) THEN 
+                        ALTER TABLE loans ADD COLUMN payment_amount DECIMAL(10,2);
+                    END IF;
+                END $$;
+            `
+        });
+        
+        if (paymentColumnsError) {
+            console.log('Erro ao adicionar colunas de pagamento (pode ser que já existam):', paymentColumnsError);
         }
         
         // Tabela de movimentações de caixa
@@ -330,6 +391,8 @@ async function createTablesFallback() {
                 final_amount DECIMAL(10,2) NOT NULL,
                 loan_date DATE NOT NULL,
                 due_date DATE,
+                payment_date DATE,
+                payment_amount DECIMAL(10,2),
                 notes TEXT,
                 status VARCHAR(20) DEFAULT 'active',
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -572,6 +635,71 @@ function renderLoans() {
     });
 }
 
+// Função para renderizar a lista de parcelamento (apenas empréstimos vencidos)
+function renderInstallments(overdueLoans) {
+    const installmentsContainer = document.querySelector('.installments-list');
+    
+    if (!installmentsContainer) {
+        console.error('Container de parcelamento não encontrado');
+        return;
+    }
+    
+    installmentsContainer.innerHTML = '';
+    
+        if (overdueLoans.length === 0) {
+        installmentsContainer.innerHTML = '<tr><td colspan="8" class="px-6 py-4 text-center text-gray-500">Nenhum empréstimo vencido para parcelamento</td></tr>';
+        return;
+    }
+
+    overdueLoans.forEach(loan => {
+        const row = document.createElement('tr');
+        const clientName = loan.clients ? loan.clients.name : 'Cliente não encontrado';
+        const clientCpf = loan.clients ? loan.clients.cpf : 'N/A';
+        
+        // Calcula o valor restante (pode ser ajustado conforme a lógica de negócio)
+        const remainingAmount = loan.final_amount || loan.amount;
+        
+        // Determina o status visual
+        const isOverdue = new Date(loan.due_date) < new Date();
+        const statusClass = isOverdue ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800';
+        const statusText = isOverdue ? 'Vencido' : 'Ativo';
+        
+        row.innerHTML = `
+            <td class="px-6 py-4 whitespace-nowrap">
+                <div class="flex items-center">
+                    <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mr-3">
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <div>
+                        <div class="font-medium text-gray-900">${clientName}</div>
+                        <div class="text-sm text-gray-500">${clientCpf}</div>
+                    </div>
+                </div>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatCurrency(loan.amount)}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">${formatCurrency(remainingAmount)}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${loan.interest_rate}%</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatDate(loan.loan_date)}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatDate(loan.due_date)}</td>
+            <td class="px-6 py-4 whitespace-nowrap">
+                <span class="px-2 py-1 text-xs rounded-full ${statusClass}">${statusText}</span>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                <button class="text-green-600 hover:text-green-900 mr-3" onclick="openPaymentModal(${loan.id})" title="Registrar Pagamento">
+                    <i class="fas fa-money-bill-wave"></i>
+                </button>
+                <button class="text-blue-600 hover:text-blue-900 mr-3" onclick="openInstallmentModal(${loan.id})" title="Editar Parcela">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button class="text-purple-600 hover:text-purple-900" onclick="viewInstallmentHistory(${loan.id})" title="Histórico">
+                    <i class="fas fa-history"></i>
+                </button>
+            </td>
+        `;
+        installmentsContainer.appendChild(row);
+    });
+}
+
 function renderCashHistory() {
     const cashHistoryContainer = document.querySelector('.cash-history');
     cashHistoryContainer.innerHTML = '';
@@ -622,7 +750,7 @@ function updateCashBalance() {
 function updateTotalReceivable() {
     const totalReceivable = loans
         .filter(loan => loan.status === 'active')
-        .reduce((sum, loan) => sum + parseFloat(loan.final_amount), 0);
+        .reduce((sum, loan) => sum + parseFloat(loan.final_amount || loan.amount), 0);
     
     document.querySelector('.total-receivable').textContent = formatCurrency(totalReceivable);
     document.querySelector('.total-receivable-cash').textContent = formatCurrency(totalReceivable);
@@ -638,7 +766,7 @@ function updateLoansSummary() {
     
     // Calcula juros recebidos apenas de empréstimos quitados
     const totalInterest = paidLoans.reduce((sum, loan) => {
-        const interest = parseFloat(loan.final_amount) - parseFloat(loan.amount);
+        const interest = parseFloat(loan.final_amount || loan.amount) - parseFloat(loan.amount);
         return sum + interest;
     }, 0);
     
@@ -919,6 +1047,59 @@ function closeCashModal() {
     document.getElementById('cash-modal').classList.add('hidden');
 }
 
+// Funções de modal para parcelamento
+function openPaymentModal(loanId = null) {
+    const modal = document.getElementById('payment-modal');
+    const form = document.getElementById('payment-form');
+    
+    if (loanId) {
+        // Modal aberto para um empréstimo específico
+        const loan = loans.find(l => l.id === loanId);
+        if (loan) {
+            document.getElementById('payment-loan').value = loan.id;
+            updatePaymentRemaining();
+        }
+    } else {
+        // Modal aberto para selecionar qualquer empréstimo
+        form.reset();
+        document.getElementById('payment-loan').value = '';
+        document.getElementById('payment-date').value = new Date().toISOString().split('T')[0];
+        document.getElementById('payment-remaining').textContent = 'R$ 0,00';
+    }
+    
+    modal.classList.remove('hidden');
+}
+
+function closePaymentModal() {
+    document.getElementById('payment-modal').classList.add('hidden');
+    document.getElementById('payment-form').reset();
+}
+
+function openInstallmentModal(loanId) {
+    const modal = document.getElementById('installment-modal');
+    const loan = loans.find(l => l.id === loanId);
+    
+    if (loan) {
+        const clientName = loan.clients ? loan.clients.name : 'Cliente não encontrado';
+        
+        document.getElementById('installment-loan-id').value = loan.id;
+        document.getElementById('installment-client-name').value = clientName;
+        document.getElementById('installment-original-amount').value = formatCurrency(loan.amount);
+        document.getElementById('installment-remaining-amount').value = loan.final_amount || loan.amount;
+        document.getElementById('installment-new-due-date').value = loan.due_date;
+        document.getElementById('installment-new-rate').value = loan.interest_rate;
+        document.getElementById('installment-status').value = loan.status;
+        document.getElementById('installment-notes').value = loan.notes || '';
+    }
+    
+    modal.classList.remove('hidden');
+}
+
+function closeInstallmentModal() {
+    document.getElementById('installment-modal').classList.add('hidden');
+    document.getElementById('installment-form').reset();
+}
+
 // Funções de formulário
 async function handleClientSubmit(e) {
     e.preventDefault();
@@ -1099,6 +1280,137 @@ async function handleCashSubmit(e) {
     }
 }
 
+// Funções de manipulação de formulários para parcelamento
+async function handlePaymentSubmit(e) {
+    e.preventDefault();
+    
+    try {
+        const loanId = document.getElementById('payment-loan').value;
+        const paymentAmount = parseFloat(document.getElementById('payment-amount').value);
+        const paymentDate = document.getElementById('payment-date').value;
+        const paymentType = document.getElementById('payment-type').value;
+        const paymentNotes = document.getElementById('payment-notes').value;
+        
+        if (!loanId || !paymentAmount || !paymentDate) {
+            showNotification('Todos os campos obrigatórios devem ser preenchidos', 'error');
+            return;
+        }
+        
+        if (paymentAmount <= 0) {
+            showNotification('O valor do pagamento deve ser positivo', 'error');
+            return;
+        }
+        
+        const loan = loans.find(l => l.id === parseInt(loanId));
+        if (!loan) {
+            showNotification('Empréstimo não encontrado', 'error');
+            return;
+        }
+        
+        // Calcula o valor restante após o pagamento
+        const currentRemaining = loan.final_amount || loan.amount;
+        const newRemaining = Math.max(0, currentRemaining - paymentAmount);
+        
+        // Atualiza o empréstimo
+        const updateData = {
+            payment_amount: paymentAmount,
+            payment_date: paymentDate
+        };
+        
+        // Se o pagamento for total, marca como pago
+        if (paymentType === 'full' || newRemaining === 0) {
+            updateData.status = 'paid';
+            updateData.payment_amount = currentRemaining;
+        }
+        
+        // Atualiza o empréstimo no banco
+        const { error: updateError } = await supabase
+            .from('loans')
+            .update(updateData)
+            .eq('id', loanId);
+        
+        if (updateError) throw updateError;
+        
+        // Registra a movimentação de caixa
+        try {
+            await addCashMovement('income', paymentAmount, `Pagamento de empréstimo - Cliente: ${loan.clients?.name || 'N/A'}`, paymentDate);
+        } catch (cashError) {
+            console.warn('Erro ao registrar movimentação de caixa:', cashError);
+        }
+        
+        // Atualiza os dados locais
+        await loadLoans();
+        await loadCashMovements();
+        await loadInstallmentsData();
+        
+        closePaymentModal();
+        showNotification('Pagamento registrado com sucesso!', 'success');
+        
+    } catch (error) {
+        console.error('Erro ao registrar pagamento:', error);
+        showNotification('Erro ao registrar pagamento', 'error');
+    }
+}
+
+async function handleInstallmentSubmit(e) {
+    e.preventDefault();
+    
+    try {
+        const loanId = document.getElementById('installment-loan-id').value;
+        const remainingAmount = parseFloat(document.getElementById('installment-remaining-amount').value);
+        const newDueDate = document.getElementById('installment-new-due-date').value;
+        const newRate = document.getElementById('installment-new-rate').value;
+        const newStatus = document.getElementById('installment-status').value;
+        const notes = document.getElementById('installment-notes').value;
+        
+        if (!loanId || !remainingAmount) {
+            showNotification('Campos obrigatórios devem ser preenchidos', 'error');
+            return;
+        }
+        
+        if (remainingAmount < 0) {
+            showNotification('O valor restante não pode ser negativo', 'error');
+            return;
+        }
+        
+        const updateData = {
+            final_amount: remainingAmount,
+            notes: notes
+        };
+        
+        if (newDueDate) {
+            updateData.due_date = newDueDate;
+        }
+        
+        if (newRate) {
+            updateData.interest_rate = parseFloat(newRate);
+        }
+        
+        if (newStatus) {
+            updateData.status = newStatus;
+        }
+        
+        // Atualiza o empréstimo no banco
+        const { error: updateError } = await supabase
+            .from('loans')
+            .update(updateData)
+            .eq('id', loanId);
+        
+        if (updateError) throw updateError;
+        
+        // Atualiza os dados locais
+        await loadLoans();
+        await loadInstallmentsData();
+        
+        closeInstallmentModal();
+        showNotification('Parcela atualizada com sucesso!', 'success');
+        
+    } catch (error) {
+        console.error('Erro ao atualizar parcela:', error);
+        showNotification('Erro ao atualizar parcela', 'error');
+    }
+}
+
 // Funções auxiliares
 async function addCashMovement(type, amount, description, date) {
     try {
@@ -1174,6 +1486,106 @@ function updateClientSelect() {
         option.textContent = `${client.name} - ${client.cpf}`;
         select.appendChild(option);
     });
+}
+
+// Função para atualizar o select de empréstimos para pagamento
+function updatePaymentLoanSelect(activeLoans) {
+    const select = document.getElementById('payment-loan');
+    if (!select) return;
+    
+    select.innerHTML = '<option value="">Selecione um empréstimo</option>';
+    
+    activeLoans.forEach(loan => {
+        const clientName = loan.clients ? loan.clients.name : 'Cliente não encontrado';
+        const remainingAmount = loan.final_amount || loan.amount;
+        const option = document.createElement('option');
+        option.value = loan.id;
+        option.textContent = `${clientName} - ${formatCurrency(remainingAmount)} restante`;
+        select.appendChild(option);
+    });
+}
+
+// Função para atualizar o valor restante no modal de pagamento
+function updatePaymentRemaining() {
+    const loanId = document.getElementById('payment-loan').value;
+    const paymentAmount = parseFloat(document.getElementById('payment-amount').value) || 0;
+    
+    if (!loanId) {
+        document.getElementById('payment-remaining').textContent = 'R$ 0,00';
+        return;
+    }
+    
+    const loan = loans.find(l => l.id === parseInt(loanId));
+    if (!loan) {
+        document.getElementById('payment-remaining').textContent = 'R$ 0,00';
+        return;
+    }
+    
+    const currentRemaining = loan.final_amount || loan.amount;
+    const newRemaining = Math.max(0, currentRemaining - paymentAmount);
+    
+    document.getElementById('payment-remaining').textContent = formatCurrency(newRemaining);
+}
+
+// Função para visualizar histórico de parcelamento
+function viewInstallmentHistory(loanId) {
+    const loan = loans.find(l => l.id === loanId);
+    if (!loan) {
+        showNotification('Empréstimo não encontrado', 'error');
+        return;
+    }
+    
+    const clientName = loan.clients ? loan.clients.name : 'Cliente não encontrado';
+    const originalAmount = loan.amount;
+    const remainingAmount = loan.final_amount || loan.amount;
+    const paidAmount = originalAmount - remainingAmount;
+    
+    // Cria um modal simples para mostrar o histórico
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg w-full max-w-md p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="font-semibold text-gray-800">Histórico de Parcelamento</h3>
+                <button onclick="this.closest('.fixed').remove()" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="space-y-4">
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <div class="text-sm text-gray-600">Cliente</div>
+                    <div class="font-medium">${clientName}</div>
+                </div>
+                <div class="bg-blue-50 p-4 rounded-lg">
+                    <div class="text-sm text-blue-600">Valor Original</div>
+                    <div class="font-bold text-blue-800">${formatCurrency(originalAmount)}</div>
+                </div>
+                <div class="bg-green-50 p-4 rounded-lg">
+                    <div class="text-sm text-green-600">Valor Pago</div>
+                    <div class="font-bold text-green-800">${formatCurrency(paidAmount)}</div>
+                </div>
+                <div class="bg-orange-50 p-4 rounded-lg">
+                    <div class="text-sm text-orange-600">Valor Restante</div>
+                    <div class="font-bold text-orange-800">${formatCurrency(remainingAmount)}</div>
+                </div>
+                <div class="bg-purple-50 p-4 rounded-lg">
+                    <div class="text-sm text-purple-600">Taxa de Juros</div>
+                    <div class="font-bold text-purple-800">${loan.interest_rate}%</div>
+                </div>
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <div class="text-sm text-gray-600">Vencimento</div>
+                    <div class="font-medium">${formatDate(loan.due_date)}</div>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end">
+                <button onclick="this.closest('.fixed').remove()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Fechar
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
 }
 
 function openUploadcare() {
