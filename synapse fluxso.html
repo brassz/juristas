@@ -1,0 +1,1262 @@
+<script src="api_transacoes.js"></script>
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Fluxo de Caixa</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+    <style>
+        .sidebar {
+            transition: all 0.3s;
+        }
+        .content-area {
+            transition: all 0.3s;
+        }
+        .pdf-viewer {
+            height: 70vh;
+            border: 1px solid #e2e8f0;
+        }
+        .dashboard-card {
+            transition: transform 0.2s;
+        }
+        .dashboard-card:hover {
+            transform: translateY(-5px);
+        }
+        .transaction-item {
+            transition: background-color 0.2s;
+        }
+        .transaction-item:hover {
+            background-color: #f8fafc;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div class="flex h-screen overflow-hidden">
+        <!-- Sidebar -->
+        <div class="sidebar bg-blue-800 text-white w-64 flex-shrink-0">
+            <div class="p-4 flex items-center space-x-2">
+                <i class="fas fa-cash-register text-2xl"></i>
+                <h1 class="text-xl font-bold">Caixa Synapse</h1>
+            </div>
+            <nav class="mt-6">
+                <div class="px-4 py-2 text-sm font-medium text-blue-200">GERAL</div>
+                <a href="#" class="block px-4 py-2 text-white hover:bg-blue-700 transition active-dashboard">
+                    <i class="fas fa-chart-line mr-2"></i> Dashboard
+                </a>
+                <a href="#" class="block px-4 py-2 text-white hover:bg-blue-700 transition active-transactions">
+                    <i class="fas fa-exchange-alt mr-2"></i> Transações
+                </a>
+                <a href="#" class="block px-4 py-2 text-white hover:bg-blue-700 transition active-cash">
+                    <i class="fas fa-wallet mr-2"></i> Caixa
+                </a>
+                
+                <div class="px-4 py-2 mt-4 text-sm font-medium text-blue-200">OPERACÕES</div>
+                <a href="#" class="block px-4 py-2 text-white hover:bg-blue-700 transition active-sales">
+                    <i class="fas fa-shopping-cart mr-2"></i> Vendas
+                </a>
+                <a href="#" class="block px-4 py-2 text-white hover:bg-blue-700 transition active-purchases">
+                    <i class="fas fa-boxes mr-2"></i> Compras
+                </a>
+                
+                <div class="px-4 py-2 mt-4 text-sm font-medium text-blue-200">DOCUMENTOS</div>
+                <a href="#" class="block px-4 py-2 text-white hover:bg-blue-700 transition active-pdfs">
+                    <i class="fas fa-file-pdf mr-2"></i> PDFs
+                </a>
+            </nav>
+            <div class="absolute bottom-0 left-0 right-0 py-3 bg-blue-900">
+                <div class="flex items-center justify-center">
+                    <div class="text-center">
+                        <div class="font-medium">Desenvolvido por Synapse Software e Tecnologia.</div>
+                        <div class="text-xs text-blue-300">Bruno Assoni Desenvolvedor Back-END</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="content-area flex-1 flex flex-col overflow-hidden">
+            <!-- Header -->
+            <header class="bg-white border-b border-gray-200 p-4 flex justify-between items-center">
+                <h2 class="text-xl font-semibold text-gray-800 section-title">Dashboard</h2>
+                <div class="flex items-center space-x-4">
+                    <div class="relative">
+                        <input type="text" placeholder="Pesquisar..." class="pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <i class="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+                    </div>
+                    <button class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center" onclick="openModal()">
+                        <i class="fas fa-plus mr-2"></i> Nova Transação
+                    </button>
+                </div>
+            </header>
+
+            <!-- Dynamic Content -->
+            <main class="flex-1 overflow-auto p-6 bg-gray-50">
+                <!-- Dashboard Section -->
+                <section id="dashboard-section" class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div class="dashboard-card bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <div class="text-sm text-gray-500">Saldo em Caixa (BRL)</div>
+                                    <div class="text-3xl font-bold mt-1 cash-balance-brl">R$ 0,00</div>
+                                </div>
+                                <div class="bg-green-100 text-green-800 p-2 rounded-lg">
+                                    <i class="fas fa-coins"></i>
+                                </div>
+                            </div>
+                            <div class="mt-4 text-sm text-gray-500 flex items-center">
+                                <span class="mr-2"><i class="fas fa-arrow-up text-green-500"></i></span>
+                                <span>Total de entradas: <span class="text-green-500 font-medium total-deposits-brl">R$ 0,00</span></span>
+                            </div>
+                        </div>
+                        
+                        <div class="dashboard-card bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <div class="text-sm text-gray-500">Saldo em Caixa (USD)</div>
+                                    <div class="text-3xl font-bold mt-1 cash-balance-usd">$ 0.00</div>
+                                </div>
+                                <div class="bg-blue-100 text-blue-800 p-2 rounded-lg">
+                                    <i class="fas fa-dollar-sign"></i>
+                                </div>
+                            </div>
+                            <div class="mt-4 text-sm text-gray-500 flex items-center">
+                                <span class="mr-2"><i class="fas fa-arrow-up text-green-500"></i></span>
+                                <span>Total de entradas: <span class="text-green-500 font-medium total-deposits-usd">$ 0.00</span></span>
+                            </div>
+                        </div>
+                        
+                        <div class="dashboard-card bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <div class="text-sm text-gray-500">Fluxo do Dia</div>
+                                    <div class="text-3xl font-bold mt-1 day-flow">R$ 0,00</div>
+                                </div>
+                                <div class="bg-purple-100 text-purple-800 p-2 rounded-lg">
+                                    <i class="fas fa-chart-bar"></i>
+                                </div>
+                            </div>
+                            <div class="mt-4 text-sm text-gray-500 flex items-center">
+                                <span class="mr-2"><i class="fas fa-arrow-down text-red-500"></i></span>
+                                <span>Total de saídas: <span class="text-red-500 font-medium total-withdrawals">R$ 0,00</span></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="font-semibold text-gray-800">Últimas Transações</h3>
+                                <a href="#" class="text-sm text-blue-600 hover:text-blue-800">Ver todas</a>
+                            </div>
+                            <div class="space-y-4 last-transactions">
+                                <!-- Transações serão adicionadas dinamicamente aqui -->
+                                <div class="text-center text-gray-500 py-4">Nenhuma transação recente</div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="font-semibold text-gray-800">Resumo por Categoria</h3>
+                                <div class="relative">
+                                    <select class="appearance-none bg-gray-100 border-0 pl-3 pr-8 py-1 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                        <option>Este Mês</option>
+                                        <option>Mês Passado</option>
+                                        <option>Este Ano</option>
+                                    </select>
+                                    <i class="fas fa-chevron-down absolute right-2 top-2 text-gray-400 pointer-events-none"></i>
+                                </div>
+                            </div>
+                            <div class="h-64 category-chart">
+                                <!-- Gráfico será renderizado aqui -->
+                                <div class="flex items-center justify-center h-full text-gray-500">
+                                    <div class="text-center">
+                                        <i class="fas fa-chart-pie text-4xl mb-2"></i>
+                                        <div>Sem dados para exibir</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Transactions Section -->
+                <section id="transactions-section" class="hidden">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                        <div class="border-b border-gray-200 p-4 flex justify-between items-center">
+                            <h3 class="font-semibold text-gray-800">Todas as Transações</h3>
+                            <div class="flex space-x-2">
+                                <button class="bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 transition">
+                                    <i class="fas fa-filter mr-1"></i> Filtrar
+                                </button>
+                                <button class="border border-gray-300 px-3 py-1 rounded-lg hover:bg-gray-50 transition">
+                                    <i class="fas fa-download mr-1"></i> Exportar
+                                </button>
+                            </div>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Descrição</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Categoria</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Valor</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Moeda</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200 all-transactions">
+                                    <tr>
+                                        <td colspan="6" class="px-6 py-4 text-center text-gray-500">Nenhuma transação cadastrada</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="border-t border-gray-200 px-6 py-3 flex justify-between items-center bg-gray-50">
+                            <div class="text-sm text-gray-500">Mostrando <span class="font-medium">0</span> de <span class="font-medium">0</span> transações</div>
+                            <div class="flex space-x-2">
+                                <button class="border border-gray-300 px-3 py-1 rounded-lg hover:bg-gray-50 transition disabled:opacity-50" disabled>
+                                    Anterior
+                                </button>
+                                <button class="border border-gray-300 px-3 py-1 rounded-lg hover:bg-gray-50 transition disabled:opacity-50" disabled>
+                                    Próxima
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Cash Section -->
+                <section id="cash-section" class="hidden">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <h3 class="font-semibold text-gray-800 mb-4">Caixa (BRL)</h3>
+                            <div class="space-y-4">
+                                <div class="flex justify-between items-center p-4 bg-gray-50 rounded-lg">
+                                    <div>
+                                        <div class="font-medium">Saldo Disponível</div>
+                                        <div class="text-gray-500 text-sm">Dinheiro físico em caixa</div>
+                                    </div>
+                                    <div class="text-2xl font-bold cash-on-hand-brl">R$ 0,00</div>
+                                </div>
+                                <button class="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition flex items-center justify-center" onclick="openCashModal('BRL', 'income')">
+                                    <i class="fas fa-plus-circle mr-2"></i> Adicionar Dinheiro
+                                </button>
+                                <button class="w-full bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 transition flex items-center justify-center" onclick="openCashModal('BRL', 'expense')">
+                                    <i class="fas fa-minus-circle mr-2"></i> Retirar Dinheiro
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                            <h3 class="font-semibold text-gray-800 mb-4">Caixa (USD)</h3>
+                            <div class="space-y-4">
+                                <div class="flex justify-between items-center p-4 bg-gray-50 rounded-lg">
+                                    <div>
+                                        <div class="font-medium">Saldo Disponível</div>
+                                        <div class="text-gray-500 text-sm">Dinheiro físico em caixa</div>
+                                    </div>
+                                    <div class="text-2xl font-bold cash-on-hand-usd">$ 0.00</div>
+                                </div>
+                                <button class="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition flex items-center justify-center" onclick="openCashModal('USD', 'income')">
+                                    <i class="fas fa-plus-circle mr-2"></i> Adicionar Dinheiro
+                                </button>
+                                <button class="w-full bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 transition flex items-center justify-center" onclick="openCashModal('USD', 'expense')">
+                                    <i class="fas fa-minus-circle mr-2"></i> Retirar Dinheiro
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-6 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                        <h3 class="font-semibold text-gray-800 mb-4">Histórico de Movimentações</h3>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tipo</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Valor</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Moeda</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Responsável</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200 cash-history">
+                                    <tr>
+                                        <td colspan="5" class="px-6 py-4 text-center text-gray-500">Nenhuma movimentação registrada</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Sales Section -->
+                <section id="sales-section" class="hidden">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                        <div class="border-b border-gray-200 p-4 flex justify-between items-center">
+                            <h3 class="font-semibold text-gray-800">Vendas</h3>
+                            <button class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center" onclick="openSaleModal()">
+                                <i class="fas fa-plus mr-2"></i> Nova Venda
+                            </button>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nº</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cliente</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Valor Total</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200 sales-list">
+                                    <tr>
+                                        <td colspan="6" class="px-6 py-4 text-center text-gray-500">Nenhuma venda registrada</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Purchases Section -->
+                <section id="purchases-section" class="hidden">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                        <div class="border-b border-gray-200 p-4 flex justify-between items-center">
+                            <h3 class="font-semibold text-gray-800">Compras</h3>
+                            <button class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center" onclick="openPurchaseModal()">
+                                <i class="fas fa-plus mr-2"></i> Nova Compra
+                            </button>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nº</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fornecedor</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Valor Total</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200 purchases-list">
+                                    <tr>
+                                        <td colspan="6" class="px-6 py-4 text-center text-gray-500">Nenhuma compra registrada</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- PDFs Section -->
+                <section id="pdfs-section" class="hidden">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                        <div class="border-b border-gray-200 p-4 flex justify-between items-center">
+                            <h3 class="font-semibold text-gray-800">Documentos PDF</h3>
+                            <div class="flex space-x-2">
+                                <button class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center" onclick="document.getElementById('pdf-file-input').click()">
+                                    <i class="fas fa-plus mr-2"></i> Adicionar PDF
+                                </button>
+                                <input type="file" id="pdf-file-input" accept=".pdf" style="display: none" onchange="handlePdfUpload(this.files)">
+                                <div class="relative">
+                                    <select class="appearance-none bg-white border border-gray-300 pl-3 pr-8 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                        <option>Todos</option>
+                                        <option>Notas Fiscais</option>
+                                        <option>Contratos</option>
+                                        <option>Relatórios</option>
+                                    </select>
+                                    <i class="fas fa-chevron-down absolute right-3 top-3 text-gray-400 pointer-events-none"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-4">
+                            <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 pdf-list">
+                                <div class="flex flex-col items-center justify-center p-8 border-2 border-dashed border-gray-300 rounded-lg text-gray-400">
+                                    <i class="fas fa-file-pdf text-4xl mb-2"></i>
+                                    <div>Nenhum documento disponível</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- PDF Viewer Modal -->
+                    <div id="pdf-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+                        <div class="bg-white rounded-lg w-full max-w-6xl h-5/6 flex flex-col">
+                            <div class="border-b border-gray-200 p-4 flex justify-between items-center">
+                                <h3 id="pdf-title" class="font-semibold text-gray-800">Visualizar PDF</h3>
+                                <button id="close-pdf" class="text-gray-500 hover:text-gray-700">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                            <div class="flex-1 overflow-hidden">
+                                <div id="pdf-container" class="pdf-viewer w-full h-full"></div>
+                            </div>
+                            <div class="border-t border-gray-200 p-3 flex justify-between items-center bg-gray-50">
+                                <div class="flex space-x-2">
+                                    <button id="prev-page" class="bg-white border border-gray-300 px-3 py-1 rounded-lg hover:bg-gray-50">
+                                        <i class="fas fa-chevron-left"></i> Anterior
+                                    </button>
+                                    <button id="next-page" class="bg-white border border-gray-300 px-3 py-1 rounded-lg hover:bg-gray-50">
+                                        Próxima <i class="fas fa-chevron-right"></i>
+                                    </button>
+                                </div>
+                                <div>
+                                    <span id="page-num">Página: 1</span> / <span id="page-count">1</span>
+                                </div>
+                                <div>
+                                    <input type="range" id="page-slider" min="1" max="1" value="1" class="w-32">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <!-- Sale Modal -->
+    <div id="sale-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg w-full max-w-md">
+            <div class="border-b border-gray-200 p-4 flex justify-between items-center">
+                <h3 class="font-semibold text-gray-800">Nova Venda</h3>
+                <button onclick="closeSaleModal()" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="sale-form" class="p-4 space-y-4">
+                <input type="hidden" id="sale-id">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Data</label>
+                    <input type="date" id="sale-date" class="w-full border rounded-lg p-2">
+                </div>
+                <div>
+                     <form id="sale-form" class="p-4 space-y-4">
+                <input type="hidden" id="sale-id">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Data Entrega</label>
+                    <input type="date" id="sale-date" class="w-full border rounded-lg p-2">
+                </div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Cliente</label>
+                    <input type="text" id="sale-client" class="w-full border rounded-lg p-2" placeholder="Nome do cliente">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Valor Total</label>
+                    <input type="number" id="sale-amount" class="w-full border rounded-lg p-2" placeholder="R$ 0,00">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                    <select id="sale-status" class="w-full border rounded-lg p-2">
+                        <option>Pendente</option>
+                        <option>Concluído</option>
+                        <option>Cancelado</option>
+                    </select>
+                </div>
+                <div class="pt-2">
+                    <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition">
+                        Salvar Venda
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Purchase Modal -->
+    <div id="purchase-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg w-full max-w-md">
+            <div class="border-b border-gray-200 p-4 flex justify-between items-center">
+                <h3 class="font-semibold text-gray-800">Nova Compra</h3>
+                <button onclick="closePurchaseModal()" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="purchase-form" class="p-4 space-y-4">
+                <input type="hidden" id="purchase-id">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Data</label>
+                    <input type="date" id="purchase-date" class="w-full border rounded-lg p-2">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Fornecedor</label>
+                    <input type="text" id="purchase-supplier" class="w-full border rounded-lg p-2" placeholder="Nome do fornecedor">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Valor Total</label>
+                    <input type="number" id="purchase-amount" class="w-full border rounded-lg p-2" placeholder="R$ 0,00">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                    <select id="purchase-status" class="w-full border rounded-lg p-2">
+                        <option>Pendente</option>
+                        <option>Concluído</option>
+                        <option>Cancelado</option>
+                    </select>
+                </div>
+                <div class="pt-2">
+                    <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition">
+                        Salvar Compra
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Transaction Modal -->
+    <div id="transaction-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg w-full max-w-md">
+            <div class="border-b border-gray-200 p-4 flex justify-between items-center">
+                <h3 id="modal-title" class="font-semibold text-gray-800">Nova Transação</h3>
+                <button id="close-modal" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="transaction-form" class="p-4 space-y-4">
+                <input type="hidden" id="transaction-id">
+                <div>
+                    <label for="transaction-type" class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                    <select id="transaction-type" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="income">Entrada</option>
+                        <option value="expense">Saída</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="transaction-currency" class="block text-sm font-medium text-gray-700 mb-1">Moeda</label>
+                    <select id="transaction-currency" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="BRL">Real (BRL)</option>
+                        <option value="USD">Dólar (USD)</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="transaction-amount" class="block text-sm font-medium text-gray-700 mb-1">Valor</label>
+                    <input type="number" id="transaction-amount" step="0.01" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label for="transaction-description" class="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
+                    <input type="text" id="transaction-description" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label for="transaction-category" class="block text-sm font-medium text-gray-700 mb-1">Categoria</label>
+                    <input type="text" id="transaction-category" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label for="transaction-date" class="block text-sm font-medium text-gray-700 mb-1">Data</label>
+                    <input type="date" id="transaction-date" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="pt-2">
+                    <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition">
+                        Salvar Transação
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Inicializa o PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
+        
+        // Variáveis globais
+        let pdfDoc = null;
+        let pageNum = 1;
+        let pageRendering = false;
+        let pageNumPending = null;
+        let scale = 1.5;
+        
+        // Dados de exemplo (seriam substituídos por dados reais do LocalStorage)
+        let transactions = [];
+        let sales = [];
+        let purchases = [];
+        let pdfs = [];
+        let cashBalanceBRL = 0;
+        let cashBalanceUSD = 0;
+        let cashHistory = []; // Novo array para o histórico de caixa
+        
+        // DOM Elements
+        const navLinks = document.querySelectorAll('.sidebar a');
+        const sections = {
+            dashboard: document.getElementById('dashboard-section'),
+            transactions: document.getElementById('transactions-section'),
+            cash: document.getElementById('cash-section'),
+            sales: document.getElementById('sales-section'),
+            purchases: document.getElementById('purchases-section'),
+            pdfs: document.getElementById('pdfs-section')
+        };
+        
+        const sectionTitles = {
+            dashboard: 'Dashboard',
+            transactions: 'Transações',
+            cash: 'Caixa',
+            sales: 'Vendas',
+            purchases: 'Compras',
+            pdfs: 'PDFs'
+        };
+        
+        const modal = document.getElementById('transaction-modal');
+        const pdfModal = document.getElementById('pdf-modal');
+        
+        // Inicialização
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSampleData(); // Carrega dados de exemplo
+            updateBalances();
+            renderTransactions();
+            renderSales();
+            renderPurchases();
+            renderCashHistory(); // Renderiza o histórico de caixa
+            setupEventListeners();
+        });
+        
+        function setupEventListeners() {
+            // Navegação
+            navLinks.forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    
+                    // Remove classe ativa de todos os links
+                    navLinks.forEach(l => l.classList.remove('bg-blue-700'));
+                    
+                    // Adiciona classe ativa ao link clicado
+                    this.classList.add('bg-blue-700');
+                    
+                    // Oculta todas as seções
+                    Object.values(sections).forEach(section => section.classList.add('hidden'));
+                    
+                    // Mostra a seção correspondente
+                    const sectionId = this.classList.contains('active-dashboard') ? 'dashboard' :
+                                      this.classList.contains('active-transactions') ? 'transactions' :
+                                      this.classList.contains('active-cash') ? 'cash' :
+                                      this.classList.contains('active-sales') ? 'sales' :
+                                      this.classList.contains('active-purchases') ? 'purchases' :
+                                      this.classList.contains('active-pdfs') ? 'pdfs' : 'dashboard';
+                    
+                    sections[sectionId].classList.remove('hidden');
+                    document.querySelector('.section-title').textContent = sectionTitles[sectionId];
+                });
+            });
+            
+            // Modal de transação
+            document.getElementById('close-modal').addEventListener('click', closeModal);
+            document.getElementById('transaction-form').addEventListener('submit', handleTransactionSubmit);
+            document.getElementById('sale-form').addEventListener('submit', handleSaleSubmit);
+            document.getElementById('purchase-form').addEventListener('submit', handlePurchaseSubmit);
+            
+            // Modal de PDF
+            document.getElementById('close-pdf').addEventListener('click', closePdfModal);
+            document.getElementById('prev-page').addEventListener('click', onPrevPage);
+            document.getElementById('next-page').addEventListener('click', onNextPage);
+            document.getElementById('page-slider').addEventListener('input', function() {
+                goToPage(parseInt(this.value));
+            });
+        }
+        
+        function loadSampleData() {
+            // Transações de exemplo
+            transactions = [
+                { id: 1, type: 'income', amount: 1500, currency: 'BRL', description: 'Venda de produto', category: 'Vendas', date: '2025-07-23' },
+                { id: 2, type: 'expense', amount: 300, currency: 'BRL', description: 'Compra de material', category: 'Materiais', date: '2025-07-23' },
+                { id: 3, type: 'income', amount: 250, currency: 'USD', description: 'Serviço internacional', category: 'Serviços', date: '2025-07-23' },
+                { id: 4, type: 'expense', amount: 50, currency: 'USD', description: 'AEROPORTO REDBULL', category: 'Tecnologia', date: '2025-07-23' }
+            ];
+            
+            // Vendas de exemplo
+            sales = [
+                { id: 1, date: '2023-06-01', client: 'Cliente Exemplo', amount: 1500, status: 'Concluído' }
+            ];
+            
+            // Compras de exemplo
+            purchases = [
+                { id: 1, date: '2023-06-02', supplier: 'Fornecedor Exemplo', amount: 300, status: 'Concluído' }
+            ];
+            
+            // Saldos iniciais
+            cashBalanceBRL = 1200;
+            cashBalanceUSD = 200;
+
+            // Histórico de caixa de exemplo
+            cashHistory = [
+                { id: 1, date: '2025-07-22', type: 'income', amount: 1000, currency: 'BRL', responsible: 'Sistema' },
+                { id: 2, date: '2025-07-22', type: 'expense', amount: 200, currency: 'BRL', responsible: 'Sistema' }
+            ];
+            
+            // Atualiza a interface com os dados
+            updateBalances();
+            renderTransactions();
+            renderSales();
+            renderPurchases();
+            renderCashHistory();
+        }
+        
+        function updateBalances() {
+            // Calcula totais
+            const totalDepositsBRL = transactions
+                .filter(t => t.type === 'income' && t.currency === 'BRL')
+                .reduce((sum, t) => sum + t.amount, 0);
+                
+            const totalDepositsUSD = transactions
+                .filter(t => t.type === 'income' && t.currency === 'USD')
+                .reduce((sum, t) => sum + t.amount, 0);
+                
+            const totalWithdrawals = transactions
+                .filter(t => t.type === 'expense')
+                .reduce((sum, t) => sum + t.amount, 0);
+            
+            // Atualiza interface
+            document.querySelector('.cash-balance-brl').textContent = formatCurrency(cashBalanceBRL, 'BRL');
+            document.querySelector('.cash-balance-usd').textContent = formatCurrency(cashBalanceUSD, 'USD');
+            document.querySelector('.cash-on-hand-brl').textContent = formatCurrency(cashBalanceBRL, 'BRL');
+            document.querySelector('.cash-on-hand-usd').textContent = formatCurrency(cashBalanceUSD, 'USD');
+            document.querySelector('.total-deposits-brl').textContent = formatCurrency(totalDepositsBRL, 'BRL');
+            document.querySelector('.total-deposits-usd').textContent = formatCurrency(totalDepositsUSD, 'USD');
+            document.querySelector('.total-withdrawals').textContent = formatCurrency(totalWithdrawals, 'BRL');
+            
+            // Calcula fluxo do dia (exemplo simplificado)
+            const today = new Date().toISOString().split('T')[0];
+            const dayFlow = transactions
+                .filter(t => t.date === today)
+                .reduce((sum, t) => t.type === 'income' ? sum + t.amount : sum - t.amount, 0);
+                
+            document.querySelector('.day-flow').textContent = formatCurrency(dayFlow, 'BRL');
+        }
+        
+        function formatCurrency(amount, currency) {
+            if (currency === 'BRL') {
+                return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amount);
+            } else {
+                return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+            }
+        }
+        
+        function renderTransactions() {
+            // Últimas transações (dashboard)
+            const lastTransactionsContainer = document.querySelector('.last-transactions');
+            lastTransactionsContainer.innerHTML = '';
+            
+            if (transactions.length === 0) {
+                lastTransactionsContainer.innerHTML = '<div class="text-center text-gray-500 py-4">Nenhuma transação recente</div>';
+                return;
+            }
+            
+            const recentTransactions = transactions.slice(0, 5).reverse();
+            recentTransactions.forEach(transaction => {
+                const transactionElement = document.createElement('div');
+                transactionElement.className = 'transaction-item p-3 bg-gray-50 rounded-lg flex justify-between items-center';
+                
+                const iconClass = transaction.type === 'income' ? 'text-green-500' : 'text-red-500';
+                const icon = transaction.type === 'income' ? 'fa-arrow-up' : 'fa-arrow-down';
+                
+                transactionElement.innerHTML = `
+                    <div class="flex items-center">
+                        <div class="w-8 h-8 rounded-full ${iconClass} bg-${iconClass.replace('text-', 'bg-')}200 flex items-center justify-center mr-3">
+                            <i class="fas ${icon}"></i>
+                        </div>
+                        <div>
+                            <div class="font-medium">${transaction.description}</div>
+                            <div class="text-sm text-gray-500">${transaction.category} • ${transaction.date}</div>
+                        </div>
+                    </div>
+                    <div class="${transaction.type === 'income' ? 'text-green-600' : 'text-red-600'} font-medium">
+                        ${transaction.type === 'income' ? '+' : '-'}${formatCurrency(transaction.amount, transaction.currency)}
+                    </div>
+                `;
+                
+                lastTransactionsContainer.appendChild(transactionElement);
+            });
+            
+            // Todas transações (aba de transações)
+            const allTransactionsContainer = document.querySelector('.all-transactions');
+            allTransactionsContainer.innerHTML = '';
+            
+            if (transactions.length === 0) {
+                allTransactionsContainer.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-gray-500">Nenhuma transação cadastrada</td></tr>';
+                return;
+            }
+            
+            transactions.forEach(transaction => {
+                const row = document.createElement('tr');
+                
+                const iconClass = transaction.type === 'income' ? 'text-green-500' : 'text-red-500';
+                const icon = transaction.type === 'income' ? 'fa-arrow-up' : 'fa-arrow-down';
+                
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap">${transaction.date}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">${transaction.description}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">${transaction.category}</td>
+                    <td class="px-6 py-4 whitespace-nowrap ${transaction.type === 'income' ? 'text-green-600' : 'text-red-600'}">
+                        ${formatCurrency(transaction.amount, transaction.currency)}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">${transaction.currency}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <button class="text-blue-600 hover:text-blue-800 mr-2" onclick="editTransaction(${transaction.id})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="text-red-600 hover:text-red-800" onclick="deleteTransaction(${transaction.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                `;
+                
+                allTransactionsContainer.appendChild(row);
+            });
+        }
+        
+        function openModal() {
+            document.getElementById('transaction-id').value = '';
+            document.getElementById('transaction-type').value = 'income';
+            document.getElementById('transaction-currency').value = 'BRL';
+            document.getElementById('transaction-amount').value = '';
+            document.getElementById('transaction-description').value = '';
+            document.getElementById('transaction-category').value = '';
+            const today = new Date();
+                const formattedDate = today.toISOString().substr(0, 10);
+                document.getElementById('transaction-date').value = formattedDate;
+            
+            modal.classList.remove('hidden');
+        }
+        
+        function closeModal() {
+            modal.classList.add('hidden');
+        }
+        
+        function handleTransactionSubmit(e) {
+            e.preventDefault();
+            
+            const transaction = {
+                id: document.getElementById('transaction-id').value || Date.now(),
+                type: document.getElementById('transaction-type').value,
+                currency: document.getElementById('transaction-currency').value,
+                amount: parseFloat(document.getElementById('transaction-amount').value),
+                description: document.getElementById('transaction-description').value,
+                category: document.getElementById('transaction-category').value,
+                date: document.getElementById('transaction-date').value
+            };
+            
+            // Atualiza saldo
+            if (transaction.type === 'income') {
+                if (transaction.currency === 'BRL') {
+                    cashBalanceBRL += transaction.amount;
+                } else {
+                    cashBalanceUSD += transaction.amount;
+                }
+            } else {
+                if (transaction.currency === 'BRL') {
+                    cashBalanceBRL -= transaction.amount;
+                } else {
+                    cashBalanceUSD -= transaction.amount;
+                }
+            }
+            
+            // Adiciona ao histórico de caixa se for uma movimentação de caixa
+            if (transaction.category === 'Caixa') {
+                cashHistory.push({
+                    id: Date.now(),
+                    date: transaction.date,
+                    type: transaction.type,
+                    amount: transaction.amount,
+                    currency: transaction.currency,
+                    responsible: 'Usuário' // Pode ser dinâmico no futuro
+                });
+            }
+
+            // Atualiza lista de transações
+            if (!document.getElementById('transaction-id').value) {
+                transactions.push(transaction);
+            } else {
+                const index = transactions.findIndex(t => t.id.toString() === document.getElementById('transaction-id').value);
+                if (index !== -1) {
+                    transactions[index] = transaction;
+                }
+            }
+            
+            updateBalances();
+            renderTransactions();
+            renderCashHistory(); // Atualiza o histórico de caixa
+            closeModal();
+        }
+        
+        function openPdfModal(pdfUrl) {
+            document.getElementById('pdf-title').textContent = pdfUrl.split('/').pop();
+            
+            // Inicia o carregamento do PDF
+            pdfjsLib.getDocument(pdfUrl).promise.then(function(pdfDoc_) {
+                pdfDoc = pdfDoc_;
+                document.getElementById('page-count').textContent = pdfDoc.numPages;
+                document.getElementById('page-slider').max = pdfDoc.numPages;
+                renderPage(1);
+                pdfModal.classList.remove('hidden');
+            });
+        }
+        
+        function openCashModal(currency, type) {
+            document.getElementById('transaction-id').value = '';
+            document.getElementById('transaction-type').value = type;
+            document.getElementById('transaction-currency').value = currency;
+            document.getElementById('transaction-amount').value = '';
+            document.getElementById('transaction-description').value = type === 'income' ? 'Depósito em caixa' : 'Retirada de caixa';
+            document.getElementById('transaction-category').value = 'Caixa'; // Define a categoria como 'Caixa'
+            const today = new Date();
+            document.getElementById('transaction-date').value = today.toISOString().substr(0, 10);
+            
+            modal.classList.remove('hidden');
+        }
+
+        function closePdfModal() {
+            pdfModal.classList.add('hidden');
+            pdfDoc = null;
+        }
+        
+        function renderPage(num) {
+            pageRendering = true;
+            document.getElementById('page-num').textContent = num;
+            document.getElementById('page-slider').value = num;
+            
+            pdfDoc.getPage(num).then(function(page) {
+                const viewport = page.getViewport({ scale: scale });
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const renderContext = { canvasContext: ctx, viewport: viewport };
+                
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                
+                const renderTask = page.render(renderContext);
+                
+                renderTask.promise.then(function() {
+                    document.getElementById('pdf-container').innerHTML = '';
+                    document.getElementById('pdf-container').appendChild(canvas);
+                    pageRendering = false;
+                    
+                    if (pageNumPending !== null) {
+                        renderPage(pageNumPending);
+                        pageNumPending = null;
+                    }
+                });
+            });
+        }
+        
+        function queueRenderPage(num) {
+            if (pageRendering) {
+                pageNumPending = num;
+            } else {
+                renderPage(num);
+            }
+        }
+        
+        function onPrevPage() {
+            if (pageNum <= 1) return;
+            pageNum--;
+            queueRenderPage(pageNum);
+        }
+        
+        function onNextPage() {
+            if (pageNum >= pdfDoc.numPages) return;
+            pageNum++;
+            queueRenderPage(pageNum);
+        }
+        
+        function editTransaction(id) {
+            const transaction = transactions.find(t => t.id === id);
+            if (transaction) {
+                document.getElementById('transaction-id').value = transaction.id;
+                document.getElementById('transaction-type').value = transaction.type;
+                document.getElementById('transaction-currency').value = transaction.currency;
+                document.getElementById('transaction-amount').value = transaction.amount;
+                document.getElementById('transaction-description').value = transaction.description;
+                document.getElementById('transaction-category').value = transaction.category;
+                document.getElementById('transaction-date').value = transaction.date;
+                modal.classList.remove('hidden');
+            }
+        }
+
+        function editSale(id) {
+            const sale = sales.find(s => s.id === id);
+            if (sale) {
+                document.getElementById('sale-id').value = sale.id;
+                document.getElementById('sale-date').value = sale.date;
+                document.getElementById('sale-client').value = sale.client;
+                document.getElementById('sale-amount').value = sale.amount;
+                document.getElementById('sale-status').value = sale.status;
+                openSaleModal();
+            }
+        }
+
+        function editPurchase(id) {
+            const purchase = purchases.find(p => p.id === id);
+            if (purchase) {
+                document.getElementById('purchase-id').value = purchase.id;
+                document.getElementById('purchase-date').value = purchase.date;
+                document.getElementById('purchase-supplier').value = purchase.supplier;
+                document.getElementById('purchase-amount').value = purchase.amount;
+                document.getElementById('purchase-status').value = purchase.status;
+                openPurchaseModal();
+            }
+        }
+
+        function renderSales() {
+            const salesContainer = document.querySelector('.sales-list');
+            salesContainer.innerHTML = '';
+            
+            if (sales.length === 0) {
+                salesContainer.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-gray-500">Nenhuma venda registrada</td></tr>';
+                return;
+            }
+            
+            sales.forEach((sale, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap">${index + 1}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">${sale.date}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">${sale.client}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">${formatCurrency(sale.amount, 'BRL')}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="px-2 py-1 text-xs rounded-full ${sale.status === 'Concluído' ? 'bg-green-100 text-green-800' : sale.status === 'Cancelado' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}">${sale.status}</span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <button class="text-blue-600 hover:text-blue-800 mr-2" onclick="editSale(${sale.id})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="text-red-600 hover:text-red-800" onclick="deleteSale(${sale.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                `;
+                salesContainer.appendChild(row);
+            });
+        }
+
+        function renderPurchases() {
+            const purchasesContainer = document.querySelector('.purchases-list');
+            purchasesContainer.innerHTML = '';
+            
+            if (purchases.length === 0) {
+                purchasesContainer.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-gray-500">Nenhuma compra registrada</td></tr>';
+                return;
+            }
+            
+            purchases.forEach((purchase, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap">${index + 1}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">${purchase.date}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">${purchase.supplier}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">${formatCurrency(purchase.amount, 'BRL')}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="px-2 py-1 text-xs rounded-full ${purchase.status === 'Concluído' ? 'bg-green-100 text-green-800' : purchase.status === 'Cancelado' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}">${purchase.status}</span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <button class="text-blue-600 hover:text-blue-800 mr-2" onclick="editPurchase(${purchase.id})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="text-red-600 hover:text-red-800" onclick="deletePurchase(${purchase.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                `;
+                purchasesContainer.appendChild(row);
+            });
+        }
+
+        function renderCashHistory() {
+            const cashHistoryContainer = document.querySelector('.cash-history');
+            cashHistoryContainer.innerHTML = '';
+
+            if (cashHistory.length === 0) {
+                cashHistoryContainer.innerHTML = '<tr><td colspan="5" class="px-6 py-4 text-center text-gray-500">Nenhuma movimentação registrada</td></tr>';
+                return;
+            }
+
+            cashHistory.forEach(movement => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap">${movement.date}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="px-2 py-1 text-xs rounded-full ${movement.type === 'income' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                            ${movement.type === 'income' ? 'Entrada' : 'Saída'}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap ${movement.type === 'income' ? 'text-green-600' : 'text-red-600'}">
+                        ${movement.type === 'income' ? '+' : '-'}${formatCurrency(movement.amount, movement.currency)}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">${movement.currency}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">${movement.responsible}</td>
+                `;
+                cashHistoryContainer.appendChild(row);
+            });
+        }
+
+        function deleteTransaction(id) {
+            if (confirm('Tem certeza que deseja excluir esta transação?')) {
+                const index = transactions.findIndex(t => t.id === id);
+                if (index !== -1) {
+                    const transaction = transactions[index];
+                    // Ajusta saldo ao excluir
+                    if (transaction.type === 'income') {
+                        if (transaction.currency === 'BRL') {
+                            cashBalanceBRL -= transaction.amount;
+                        } else {
+                            cashBalanceUSD -= transaction.amount;
+                        }
+                    } else {
+                        if (transaction.currency === 'BRL') {
+                            cashBalanceBRL += transaction.amount;
+                        } else {
+                            cashBalanceUSD += transaction.amount;
+                        }
+                    }
+                    transactions.splice(index, 1);
+                    
+                    // Remove do histórico de caixa se for uma movimentação de caixa
+                    if (transaction.category === 'Caixa') {
+                        const cashIndex = cashHistory.findIndex(ch => ch.id === id);
+                        if (cashIndex !== -1) {
+                            cashHistory.splice(cashIndex, 1);
+                        }
+                    }
+
+                    updateBalances();
+                    renderTransactions();
+                    renderCashHistory();
+                }
+            }
+        }
+
+        // Sale functions
+        function openSaleModal() {
+            document.getElementById('sale-id').value = '';
+            const today = new Date();
+            document.getElementById('sale-date').value = today.toISOString().split('T')[0];
+            document.getElementById('sale-client').value = '';
+            document.getElementById('sale-amount').value = '';
+            document.getElementById('sale-status').value = 'Pendente';
+            document.getElementById('sale-modal').classList.remove('hidden');
+        }
+
+        function closeSaleModal() {
+            document.getElementById('sale-modal').classList.add('hidden');
+        }
+
+        // Purchase functions
+        function openPurchaseModal() {
+            document.getElementById('purchase-id').value = '';
+            const today = new Date();
+            document.getElementById('purchase-date').value = today.toISOString().split('T')[0];
+            document.getElementById('purchase-supplier').value = '';
+            document.getElementById('purchase-amount').value = '';
+            document.getElementById('purchase-status').value = 'Pendente';
+            document.getElementById('purchase-modal').classList.remove('hidden');
+        }
+
+        function handleSaleSubmit(e) {
+            e.preventDefault();
+            
+            const sale = {
+                id: document.getElementById('sale-id').value || Date.now(),
+                date: document.getElementById('sale-date').value,
+                client: document.getElementById('sale-client').value,
+                amount: parseFloat(document.getElementById('sale-amount').value),
+                status: document.getElementById('sale-status').value
+            };
+
+            // Add as income transaction and update balance
+            const transaction = {
+                id: Date.now(),
+                type: 'income',
+                currency: 'BRL',
+                amount: sale.amount,
+                description: `Venda para ${sale.client}`,
+                category: 'Vendas',
+                date: sale.date
+            };
+            
+            transactions.push(transaction);
+            cashBalanceBRL += sale.amount;
+            
+            sales.push(sale);
+            updateBalances();
+            renderTransactions();
+            renderSales();  // Adicionado esta linha para renderizar as vendas
+            closeSaleModal();
+        }
+
+        function deleteSale(id) {
+            if (confirm('Tem certeza que deseja excluir esta venda?')) {
+                const index = sales.findIndex(s => s.id === id);
+                if (index !== -1) {
+                    sales.splice(index, 1);
+                    renderSales();
+                }
+            }
+        }
+
+        function deletePurchase(id) {
+            if (confirm('Tem certeza que deseja excluir esta compra?')) {
+                const index = purchases.findIndex(p => p.id === id);
+                if (index !== -1) {
+                    purchases.splice(index, 1);
+                    renderPurchases();
+                }
+            }
+        }
+
+        function handlePurchaseSubmit(e) {
+            e.preventDefault();
+            
+            const purchase = {
+                id: document.getElementById('purchase-id').value || Date.now(),
+                date: document.getElementById('purchase-date').value,
+                supplier: document.getElementById('purchase-supplier').value,
+                amount: parseFloat(document.getElementById('purchase-amount').value),
+                status: document.getElementById('purchase-status').value
+            };
+            const transaction = {
+                id: Date.now(),
+                type: 'expense',
+                currency: 'BRL',
+                amount: purchase.amount,
+                description: `Compra de ${purchase.supplier}`,
+                category: 'Compras',
+                date: purchase.date
+            };
+            
+            transactions.push(transaction);
+            cashBalanceBRL -= purchase.amount;
+
+            if (document.getElementById('purchase-id').value) {
+                const index = purchases.findIndex(p => p.id.toString() === document.getElementById('purchase-id').value);
+                if (index !== -1) {
+                    purchases[index] = purchase;
+                }
+            } else {
+                purchases.push(purchase);
+            }
+            
+            updateBalances();
+            renderTransactions();
+            renderPurchases();
+            closePurchaseModal();
+        }
+
+        function closePurchaseModal() {
+            document.getElementById('purchase-modal').classList.add('hidden');
+        }
+
+        function handlePdfUpload(files) {
+            if (files && files[0]) {
+                const fileUrl = URL.createObjectURL(files[0]);
+                openPdfModal(fileUrl);
+            }
+        }
+
+        function goToPage(num) {
+            if (num === pageNum || num < 1 || num > pdfDoc.numPages) return;
+            pageNum = num;
+            queueRenderPage(num);
+        }
+
+
