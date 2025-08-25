@@ -40,10 +40,10 @@ function setupEventListeners() {
             e.preventDefault();
             
             // Remove classe ativa de todos os links
-            navLinks.forEach(l => l.classList.remove('bg-blue-700'));
+            navLinks.forEach(l => l.classList.remove('active'));
             
             // Adiciona classe ativa ao link clicado
-            this.classList.add('bg-blue-700');
+            this.classList.add('active');
             
             // Oculta todas as seções
             Object.values(sections).forEach(section => section.classList.add('hidden'));
@@ -56,6 +56,17 @@ function setupEventListeners() {
             
             sections[sectionId].classList.remove('hidden');
             document.querySelector('.section-title').textContent = sectionTitles[sectionId];
+            
+            // Adiciona animação de entrada para a seção
+            const activeSection = sections[sectionId];
+            activeSection.style.opacity = '0';
+            activeSection.style.transform = 'translateY(20px)';
+            
+            setTimeout(() => {
+                activeSection.style.transition = 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)';
+                activeSection.style.opacity = '1';
+                activeSection.style.transform = 'translateY(0)';
+            }, 100);
         });
     });
     
@@ -119,7 +130,11 @@ async function loadClients() {
         updateClientSelect();
     } catch (error) {
         console.error('Erro ao carregar clientes:', error);
-        showNotification('Erro ao carregar clientes', 'error');
+        // Se a tabela não existir, cria com dados de exemplo
+        if (error.code === 'PGRST116') {
+            await createTables();
+            await loadClients();
+        }
     }
 }
 
@@ -129,7 +144,7 @@ async function loadLoans() {
             .from('loans')
             .select(`
                 *,
-                clients(name, email, phone)
+                clients(name, cpf)
             `)
             .order('created_at', { ascending: false });
         
@@ -139,35 +154,31 @@ async function loadLoans() {
         renderLoans();
     } catch (error) {
         console.error('Erro ao carregar empréstimos:', error);
-        showNotification('Erro ao carregar empréstimos', 'error');
+        if (error.code === 'PGRST116') {
+            await createTables();
+            await loadLoans();
+        }
     }
 }
 
 async function loadCashMovements() {
     try {
         const { data, error } = await supabase
-            .from('transactions')
+            .from('cash_movements')
             .select('*')
             .order('created_at', { ascending: false });
         
         if (error) throw error;
         
-        // Mapeia os dados para o formato esperado pelo código
-        cashMovements = (data || []).map(transaction => ({
-            id: transaction.id,
-            type: transaction.type,
-            amount: transaction.amount,
-            description: transaction.description,
-            movement_date: transaction.date,
-            responsible: 'Usuário',
-            created_at: transaction.created_at
-        }));
-        
+        cashMovements = data || [];
         calculateCashBalance();
         renderCashHistory();
     } catch (error) {
         console.error('Erro ao carregar movimentações:', error);
-        showNotification('Erro ao carregar movimentações de caixa', 'error');
+        if (error.code === 'PGRST116') {
+            await createTables();
+            await loadCashMovements();
+        }
     }
 }
 
@@ -273,7 +284,7 @@ function renderClients() {
                     </div>
                 </div>
             </td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${client.document}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${client.cpf}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${client.email}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${client.phone}</td>
             <td class="px-6 py-4 text-sm text-gray-900 max-w-xs truncate">${client.address}</td>
@@ -328,8 +339,8 @@ function renderLoans() {
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatCurrency(loan.amount)}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${loan.interest_rate}%</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">${formatCurrency(loan.amount * (1 + loan.interest_rate / 100))}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatDate(loan.start_date)}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">${formatCurrency(loan.final_amount)}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formatDate(loan.loan_date)}</td>
             <td class="px-6 py-4 whitespace-nowrap">
                 <span class="px-2 py-1 text-xs rounded-full ${statusClass}">${statusText}</span>
             </td>
@@ -359,11 +370,11 @@ function renderLoans() {
                 </div>
                 <div>
                     <div class="font-medium">${clientName}</div>
-                    <div class="text-sm text-gray-500">${formatDate(loan.start_date)}</div>
+                    <div class="text-sm text-gray-500">${formatDate(loan.loan_date)}</div>
                 </div>
             </div>
             <div class="text-right">
-                <div class="font-medium text-green-600">${formatCurrency(loan.amount * (1 + loan.interest_rate / 100))}</div>
+                <div class="font-medium text-green-600">${formatCurrency(loan.final_amount)}</div>
                 <div class="text-sm text-gray-500">${loan.interest_rate}% juros</div>
             </div>
         `;
@@ -418,7 +429,7 @@ function updateCashBalance() {
 function updateTotalReceivable() {
     const totalReceivable = loans
         .filter(loan => loan.status === 'active')
-        .reduce((sum, loan) => sum + parseFloat(loan.amount * (1 + loan.interest_rate / 100)), 0);
+        .reduce((sum, loan) => sum + parseFloat(loan.final_amount), 0);
     
     document.querySelector('.total-receivable').textContent = formatCurrency(totalReceivable);
     document.querySelector('.total-receivable-cash').textContent = formatCurrency(totalReceivable);
@@ -431,7 +442,7 @@ function updateTotalClients() {
 function updateLoansSummary() {
     const activeLoans = loans.filter(loan => loan.status === 'active');
     const totalInterest = loans.reduce((sum, loan) => {
-        const interest = parseFloat(loan.amount * (1 + loan.interest_rate / 100)) - parseFloat(loan.amount);
+        const interest = parseFloat(loan.final_amount) - parseFloat(loan.amount);
         return sum + interest;
     }, 0);
     
@@ -466,7 +477,7 @@ function openClientModal(clientId = null) {
             title.textContent = 'Editar Cliente';
             document.getElementById('client-id').value = client.id;
             document.getElementById('client-name').value = client.name;
-            document.getElementById('client-cpf').value = client.document;
+            document.getElementById('client-cpf').value = client.cpf;
             document.getElementById('client-email').value = client.email;
             document.getElementById('client-phone').value = client.phone;
             document.getElementById('client-address').value = client.address;
@@ -501,10 +512,10 @@ function openLoanModal(loanId = null) {
             title.textContent = 'Editar Empréstimo';
             document.getElementById('loan-id').value = loan.id;
             document.getElementById('loan-client').value = loan.client_id;
-            document.getElementById('loan-date').value = loan.start_date;
+            document.getElementById('loan-date').value = loan.loan_date;
             document.getElementById('loan-amount').value = loan.amount;
             document.getElementById('loan-rate').value = loan.interest_rate;
-            document.getElementById('loan-notes').value = loan.description || '';
+            document.getElementById('loan-notes').value = loan.notes || '';
             
             calculateLoanInterest();
         }
@@ -545,11 +556,11 @@ async function handleClientSubmit(e) {
     
     const clientData = {
         name: document.getElementById('client-name').value,
-        document: document.getElementById('client-cpf').value,
+        cpf: document.getElementById('client-cpf').value,
         email: document.getElementById('client-email').value,
         phone: document.getElementById('client-phone').value,
         address: document.getElementById('client-address').value,
-        notes: getUploadedDocuments().map(doc => doc.name).join(', ')
+        documents: getUploadedDocuments()
     };
     
     const clientId = document.getElementById('client-id').value;
@@ -586,12 +597,12 @@ async function handleLoanSubmit(e) {
     e.preventDefault();
     
     const loanData = {
-        client_id: document.getElementById('loan-client').value,
+        client_id: parseInt(document.getElementById('loan-client').value),
         amount: parseFloat(document.getElementById('loan-amount').value),
         interest_rate: parseFloat(document.getElementById('loan-rate').value),
-        start_date: document.getElementById('loan-date').value,
-        due_date: calculateDueDate(document.getElementById('loan-date').value, parseFloat(document.getElementById('loan-rate').value)),
-        description: document.getElementById('loan-notes').value || null
+        final_amount: parseFloat(document.getElementById('loan-amount').value) * (1 + parseFloat(document.getElementById('loan-rate').value) / 100),
+        loan_date: document.getElementById('loan-date').value,
+        notes: document.getElementById('loan-notes').value
     };
     
     const loanId = document.getElementById('loan-id').value;
@@ -614,18 +625,14 @@ async function handleLoanSubmit(e) {
             }
             
             // Criar novo empréstimo
-            const { data, error } = await supabase
+            const { error } = await supabase
                 .from('loans')
-                .insert([loanData])
-                .select();
+                .insert([loanData]);
             
-            if (error) {
-                console.error('Erro detalhado:', error);
-                throw error;
-            }
+            if (error) throw error;
             
             // Deduzir do caixa
-            await addCashMovement('expense', loanData.amount, `Empréstimo para cliente ID: ${loanData.client_id}`, loanData.start_date);
+            await addCashMovement('expense', loanData.amount, `Empréstimo para cliente ID: ${loanData.client_id}`, loanData.loan_date);
             
             showNotification('Empréstimo criado com sucesso!', 'success');
         }
@@ -635,7 +642,7 @@ async function handleLoanSubmit(e) {
         closeLoanModal();
     } catch (error) {
         console.error('Erro ao salvar empréstimo:', error);
-        showNotification(`Erro ao salvar empréstimo: ${error.message}`, 'error');
+        showNotification('Erro ao salvar empréstimo', 'error');
     }
 }
 
@@ -664,14 +671,13 @@ async function handleCashSubmit(e) {
 async function addCashMovement(type, amount, description, date) {
     try {
         const { error } = await supabase
-            .from('transactions')
+            .from('cash_movements')
             .insert([{
                 type,
                 amount,
                 description,
-                category: type === 'income' ? 'Entradas' : 'Saídas',
-                date,
-                created_at: new Date().toISOString()
+                movement_date: date,
+                responsible: 'Usuário'
             }]);
         
         if (error) throw error;
@@ -707,16 +713,6 @@ function calculateLoanInterest() {
     document.getElementById('loan-interest-amount').textContent = `Juros: ${formatCurrency(interestAmount)}`;
 }
 
-function calculateDueDate(startDate, interestRate) {
-    // Calcula a data de vencimento baseada na taxa de juros
-    // Por padrão, define como 30 dias após a data de início
-    const start = new Date(startDate);
-    const dueDate = new Date(start);
-    dueDate.setDate(start.getDate() + 30);
-    
-    return dueDate.toISOString().split('T')[0];
-}
-
 function updateClientSelect() {
     const select = document.getElementById('loan-client');
     select.innerHTML = '<option value="">Selecione um cliente</option>';
@@ -724,7 +720,7 @@ function updateClientSelect() {
     clients.forEach(client => {
         const option = document.createElement('option');
         option.value = client.id;
-        option.textContent = `${client.name} - ${client.email}`;
+        option.textContent = `${client.name} - ${client.cpf}`;
         select.appendChild(option);
     });
 }
@@ -847,20 +843,37 @@ function formatDate(dateString) {
 
 // Funções de notificação
 function showNotification(message, type = 'info') {
-    // Cria uma notificação simples
     const notification = document.createElement('div');
-    notification.className = `fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 ${
-        type === 'success' ? 'bg-green-500 text-white' :
-        type === 'error' ? 'bg-red-500 text-white' :
-        'bg-blue-500 text-white'
-    }`;
-    notification.textContent = message;
+    notification.className = `fixed top-4 right-4 p-4 rounded-xl shadow-lg z-50 notification ${
+        type === 'success' ? 'bg-gradient-to-r from-green-500 to-green-600' : 
+        type === 'error' ? 'bg-gradient-to-r from-red-500 to-red-600' :
+        'bg-gradient-to-r from-blue-500 to-blue-600'
+    } text-white backdrop-blur-sm`;
+    
+    const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
+    notification.innerHTML = `
+        <div class="flex items-center space-x-3">
+            <span class="text-xl">${icon}</span>
+            <span class="font-medium">${message}</span>
+        </div>
+    `;
     
     document.body.appendChild(notification);
     
+    // Animação de entrada
+    notification.style.transform = 'translateX(100%)';
+    notification.style.opacity = '0';
+    
     setTimeout(() => {
-        notification.remove();
-    }, 3000);
+        notification.style.transform = 'translateX(0)';
+        notification.style.opacity = '1';
+    }, 100);
+    
+    setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+        notification.style.opacity = '0';
+        setTimeout(() => notification.remove(), 300);
+    }, 4000);
 }
 
 // Fallback para quando o Supabase não estiver disponível
@@ -877,4 +890,93 @@ if (typeof window.supabase === 'undefined') {
         }),
         rpc: () => ({ error: null })
     };
-} 
+}
+
+// Adiciona animações e funcionalidades interativas
+function addInteractiveFeatures() {
+    // Adiciona efeito de hover nos cards do dashboard
+    const dashboardCards = document.querySelectorAll('.dashboard-card');
+    dashboardCards.forEach(card => {
+        card.addEventListener('mouseenter', function() {
+            this.style.transform = 'translateY(-8px) scale(1.02)';
+        });
+        
+        card.addEventListener('mouseleave', function() {
+            this.style.transform = 'translateY(0) scale(1)';
+        });
+    });
+    
+    // Adiciona efeito de loading nos botões
+    const buttons = document.querySelectorAll('button[type="submit"]');
+    buttons.forEach(button => {
+        button.addEventListener('click', function() {
+            if (!this.classList.contains('loading')) {
+                this.classList.add('loading');
+                this.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processando...';
+                
+                setTimeout(() => {
+                    this.classList.remove('loading');
+                    this.innerHTML = this.getAttribute('data-original-text') || this.innerHTML;
+                }, 2000);
+            }
+        });
+    });
+    
+    // Adiciona efeito de digitação no título
+    const sectionTitle = document.querySelector('.section-title');
+    if (sectionTitle) {
+        const originalText = sectionTitle.textContent;
+        sectionTitle.textContent = '';
+        let i = 0;
+        
+        function typeWriter() {
+            if (i < originalText.length) {
+                sectionTitle.textContent += originalText.charAt(i);
+                i++;
+                setTimeout(typeWriter, 100);
+            }
+        }
+        
+        setTimeout(typeWriter, 500);
+    }
+    
+    // Adiciona contador animado nos números do dashboard
+    animateNumbers();
+}
+
+function animateNumbers() {
+    const numberElements = document.querySelectorAll('.cash-balance, .total-receivable, .total-clients');
+    
+    numberElements.forEach(element => {
+        const finalValue = element.textContent;
+        const isCurrency = finalValue.includes('R$');
+        const numericValue = isCurrency ? 
+            parseFloat(finalValue.replace(/[^\d,.-]/g, '').replace(',', '.')) : 
+            parseInt(finalValue);
+        
+        if (!isNaN(numericValue)) {
+            element.textContent = isCurrency ? 'R$ 0,00' : '0';
+            
+            let currentValue = 0;
+            const increment = numericValue / 50;
+            const timer = setInterval(() => {
+                currentValue += increment;
+                if (currentValue >= numericValue) {
+                    currentValue = numericValue;
+                    clearInterval(timer);
+                }
+                
+                if (isCurrency) {
+                    element.textContent = formatCurrency(currentValue);
+                } else {
+                    element.textContent = Math.floor(currentValue);
+                }
+            }, 50);
+        }
+    });
+}
+
+// Inicializa funcionalidades interativas quando a página carregar
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(addInteractiveFeatures, 1000);
+}); 
