@@ -1582,21 +1582,63 @@ function initializeUploadcare() {
                 if (fileInfo) {
                     console.log('Uploadcare: arquivo selecionado:', fileInfo);
                     
+                    // Verifica se o arquivo já tem URL (já foi enviado)
                     if (fileInfo.cdnUrl) {
-                        // Arquivo já foi enviado
+                        console.log('Uploadcare: arquivo já enviado, adicionando diretamente');
                         addUploadedDocument(fileInfo);
                     } else {
-                        // Arquivo está sendo enviado
+                        console.log('Uploadcare: iniciando upload, mostrando progresso');
+                        // Mostra progresso e monitora
                         showUploadProgress(fileInfo);
                         
-                        // Monitora o progresso do upload
-                        fileInfo.progress(function(info) {
-                            console.log('Uploadcare: progresso:', info);
-                            if (info.state === 'complete') {
-                                // Upload concluído
-                                addUploadedDocument(fileInfo);
+                        // Timeout de segurança para evitar que fique infinitamente em progresso
+                        const safetyTimeout = setTimeout(() => {
+                            console.warn('Timeout de segurança para upload do Uploadcare:', fileInfo.name);
+                            // Remove qualquer elemento de progresso e adiciona o documento
+                            const progressElement = document.querySelector(`[data-file-id="${fileInfo.uuid}"]`);
+                            if (progressElement) {
+                                progressElement.remove();
                             }
-                        });
+                            addUploadedDocument(fileInfo);
+                        }, 30000); // 30 segundos
+                        
+                        // Monitora o progresso do upload
+                        if (fileInfo.progress && typeof fileInfo.progress === 'function') {
+                            fileInfo.progress(function(info) {
+                                console.log('Uploadcare: progresso:', info);
+                                
+                                if (info.state === 'complete') {
+                                    clearTimeout(safetyTimeout);
+                                    console.log('Uploadcare: upload concluído');
+                                    // Remove elemento de progresso se existir
+                                    const progressElement = document.querySelector(`[data-file-id="${fileInfo.uuid}"]`);
+                                    if (progressElement) {
+                                        progressElement.remove();
+                                    }
+                                    addUploadedDocument(fileInfo);
+                                } else if (info.state === 'error') {
+                                    clearTimeout(safetyTimeout);
+                                    console.error('Uploadcare: erro no upload');
+                                    // Remove elemento de progresso se existir
+                                    const progressElement = document.querySelector(`[data-file-id="${fileInfo.uuid}"]`);
+                                    if (progressElement) {
+                                        progressElement.remove();
+                                    }
+                                    showNotification(`Erro no upload de ${fileInfo.name}`, 'error');
+                                }
+                            });
+                        } else {
+                            // Se não tem função de progresso, assume que é um arquivo já enviado
+                            setTimeout(() => {
+                                clearTimeout(safetyTimeout);
+                                console.log('Uploadcare: arquivo sem progresso, assumindo como enviado');
+                                const progressElement = document.querySelector(`[data-file-id="${fileInfo.uuid}"]`);
+                                if (progressElement) {
+                                    progressElement.remove();
+                                }
+                                addUploadedDocument(fileInfo);
+                            }, 2000);
+                        }
                     }
                 }
             });
@@ -1634,4 +1676,37 @@ function clearUploadedDocuments() {
     
     // Limpa arquivos locais
     cleanupLocalFiles();
-} 
+    
+    // Limpa elementos de progresso órfãos
+    cleanupOrphanProgressElements();
+}
+
+// Função para limpar elementos de progresso órfãos
+function cleanupOrphanProgressElements() {
+    const progressElements = document.querySelectorAll('.bg-blue-50[data-file-id]');
+    progressElements.forEach(element => {
+        console.log('Limpando elemento de progresso órfão:', element.getAttribute('data-file-id'));
+        element.remove();
+    });
+}
+
+// Função para verificar e limpar progressos travados
+function checkStuckProgress() {
+    const progressElements = document.querySelectorAll('.bg-blue-50[data-file-id]');
+    progressElements.forEach(element => {
+        const fileId = element.getAttribute('data-file-id');
+        const progressText = element.querySelector('.text-blue-600.font-medium');
+        
+        if (progressText && progressText.textContent === '0%') {
+            // Verifica se está há muito tempo em 0%
+            const timeSinceCreation = Date.now() - parseInt(fileId.split('_')[1] || '0');
+            if (timeSinceCreation > 10000) { // 10 segundos
+                console.warn('Progresso travado detectado, removendo:', fileId);
+                element.remove();
+            }
+        }
+    });
+}
+
+// Executa verificação de progressos travados a cada 5 segundos
+setInterval(checkStuckProgress, 5000); 
