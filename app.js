@@ -34,6 +34,7 @@ document.addEventListener('DOMContentLoaded', function() {
     setupEventListeners();
     loadData();
     setupDragAndDrop();
+    initializeUploadcare();
 });
 
 function setupEventListeners() {
@@ -528,6 +529,8 @@ function openClientModal(clientId = null) {
 
 function closeClientModal() {
     document.getElementById('client-modal').classList.add('hidden');
+    // Limpa os documentos quando o modal é fechado
+    clearUploadedDocuments();
 }
 
 function openDocumentsModal() {
@@ -918,90 +921,254 @@ function updateClientSelect() {
 }
 
 function openUploadcare() {
-    const widget = uploadcare.Widget('[role=uploadcare-uploader]', {
-        publicKey: UPLOADCARE_PUBLIC_KEY,
-        multiple: true,
-        multipleMax: 10,
-        multipleMin: 1,
-        locale: 'pt',
-        preferredTypes: ['image/*', 'application/pdf'],
-        imagePreviewMaxSize: 10 * 1024 * 1024, // 10MB
-        imageShrink: '1024x1024',
-        clearable: true,
-        tabs: 'file url gdrive dropbox onedrive',
-        inputAcceptTypes: '.pdf,.jpg,.jpeg,.png,.gif,.bmp,.tiff'
-    });
-    
-    widget.onChange(function(fileInfo) {
-        if (fileInfo) {
-            if (fileInfo.cdnUrl) {
-                // Arquivo já foi enviado
-                addUploadedDocument(fileInfo);
-            } else {
-                // Arquivo está sendo enviado
-                showUploadProgress(fileInfo);
-            }
+    // Verifica se o Uploadcare está disponível
+    if (typeof uploadcare === 'undefined') {
+        console.error('Uploadcare não está disponível');
+        showNotification('Erro: Uploadcare não está carregado. Usando seletor nativo.', 'warning');
+        openNativeFileSelector();
+        return;
+    }
+
+    try {
+        // Usa o widget já inicializado
+        const inputElement = document.querySelector('[role="uploadcare-uploader"]');
+        if (!inputElement) {
+            throw new Error('Elemento de upload não encontrado');
         }
-    });
+
+        const widget = uploadcare.Widget(inputElement);
+        
+        // Limpa valor anterior e abre o diálogo
+        widget.value(null);
+        widget.openDialog();
+        
+        console.log('Diálogo do Uploadcare aberto com sucesso');
+        
+    } catch (error) {
+        console.error('Erro ao abrir Uploadcare:', error);
+        showNotification('Erro ao abrir seletor de arquivos. Usando seletor nativo.', 'warning');
+        
+        // Fallback: abre o seletor de arquivos nativo
+        openNativeFileSelector();
+    }
+}
+
+// Função fallback para seletor de arquivos nativo
+function openNativeFileSelector() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = '.pdf,.jpg,.jpeg,.png,.gif,.bmp,.tiff';
     
-    widget.openDialog();
+    input.onchange = function(e) {
+        const files = Array.from(e.target.files);
+        files.forEach(file => {
+            // Simula um objeto fileInfo para compatibilidade
+            const fileInfo = {
+                uuid: 'local_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                name: file.name,
+                size: file.size,
+                mimeType: file.type,
+                cdnUrl: URL.createObjectURL(file),
+                isLocal: true
+            };
+            addUploadedDocument(fileInfo);
+        });
+    };
+    
+    input.click();
 }
 
 function addUploadedDocument(fileInfo) {
     const documentsContainer = document.getElementById('uploaded-documents');
     
+    // Verifica se o documento já existe
+    const existingDoc = document.querySelector(`[data-file-id="${fileInfo.uuid}"]`);
+    if (existingDoc) {
+        console.log('Documento já existe:', fileInfo.name);
+        return;
+    }
+    
     const documentElement = document.createElement('div');
     documentElement.className = 'flex items-center justify-between p-3 bg-gray-50 rounded-lg border';
     documentElement.setAttribute('data-file-id', fileInfo.uuid);
+    
+    // Determina o ícone baseado no tipo de arquivo
+    let fileIcon = 'fa-file-alt';
+    let iconColor = 'text-blue-600';
+    
+    if (fileInfo.mimeType) {
+        if (fileInfo.mimeType.startsWith('image/')) {
+            fileIcon = 'fa-image';
+            iconColor = 'text-green-600';
+        } else if (fileInfo.mimeType.includes('pdf')) {
+            fileIcon = 'fa-file-pdf';
+            iconColor = 'text-red-600';
+        } else if (fileInfo.mimeType.includes('word') || fileInfo.mimeType.includes('document')) {
+            fileIcon = 'fa-file-word';
+            iconColor = 'text-blue-600';
+        } else if (fileInfo.mimeType.includes('excel') || fileInfo.mimeType.includes('spreadsheet')) {
+            fileIcon = 'fa-file-excel';
+            iconColor = 'text-green-600';
+        }
+    }
+    
+    // Determina o status do arquivo
+    let statusText = '✓ Enviado com sucesso';
+    let statusColor = 'text-green-600';
+    
+    if (fileInfo.isLocal) {
+        statusText = '📁 Arquivo local';
+        statusColor = 'text-blue-600';
+    }
+    
     documentElement.innerHTML = `
         <div class="flex items-center space-x-3">
-            <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-                <i class="fas fa-file-alt text-blue-600"></i>
+            <div class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center">
+                <i class="fas ${fileIcon} ${iconColor}"></i>
             </div>
-            <div>
-                <div class="font-medium text-gray-900 text-sm">${fileInfo.name || 'Documento'}</div>
+            <div class="flex-1 min-w-0">
+                <div class="font-medium text-gray-900 text-sm truncate">${fileInfo.name || 'Documento'}</div>
                 <div class="text-xs text-gray-500">
                     ${fileInfo.size ? formatFileSize(fileInfo.size) : 'N/A'} • 
                     ${fileInfo.mimeType || 'Arquivo'}
                 </div>
-                <div class="text-xs text-green-600">✓ Enviado com sucesso</div>
+                <div class="text-xs ${statusColor}">${statusText}</div>
             </div>
         </div>
-        <button type="button" onclick="removeUploadedDocument('${fileInfo.uuid}')" class="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50">
+        <button type="button" onclick="removeUploadedDocument('${fileInfo.uuid}')" class="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 ml-2 flex-shrink-0">
             <i class="fas fa-times"></i>
         </button>
     `;
+    
     documentsContainer.appendChild(documentElement);
     
-    showNotification('Documento enviado com sucesso!', 'success');
+    // Mostra notificação de sucesso
+    const message = fileInfo.isLocal ? 'Arquivo selecionado com sucesso!' : 'Documento enviado com sucesso!';
+    showNotification(message, 'success');
+    
+    // Log para debug
+    console.log('Documento adicionado:', {
+        uuid: fileInfo.uuid,
+        name: fileInfo.name,
+        size: fileInfo.size,
+        type: fileInfo.mimeType,
+        isLocal: fileInfo.isLocal,
+        cdnUrl: fileInfo.cdnUrl
+    });
 }
 
 function showUploadProgress(fileInfo) {
     const documentsContainer = document.getElementById('uploaded-documents');
     
+    // Verifica se já existe um elemento de progresso para este arquivo
+    const existingProgress = document.querySelector(`[data-file-id="${fileInfo.uuid}"]`);
+    if (existingProgress) {
+        existingProgress.remove();
+    }
+    
     const progressElement = document.createElement('div');
     progressElement.className = 'flex items-center justify-between p-3 bg-blue-50 rounded-lg border border-blue-200';
     progressElement.setAttribute('data-file-id', fileInfo.uuid);
     progressElement.innerHTML = `
-        <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-3 flex-1">
             <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
                 <i class="fas fa-spinner fa-spin text-blue-600"></i>
             </div>
-            <div>
-                <div class="font-medium text-gray-900 text-sm">${fileInfo.name || 'Documento'}</div>
-                <div class="text-xs text-blue-600">Enviando...</div>
+            <div class="flex-1 min-w-0">
+                <div class="font-medium text-gray-900 text-sm truncate">${fileInfo.name || 'Documento'}</div>
+                <div class="text-xs text-blue-600 mb-2">Enviando...</div>
+                <div class="w-full bg-blue-200 rounded-full h-2">
+                    <div class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
             </div>
         </div>
-        <div class="w-4 h-4 bg-blue-200 rounded-full"></div>
+        <div class="ml-3 text-xs text-blue-600 font-medium">0%</div>
     `;
+    
     documentsContainer.appendChild(progressElement);
+    
+    // Simula progresso do upload (para arquivos locais)
+    if (fileInfo.isLocal) {
+        simulateUploadProgress(progressElement, fileInfo);
+    }
+    
+    console.log('Progresso de upload iniciado para:', fileInfo.name);
+}
+
+// Função para simular progresso de upload para arquivos locais
+function simulateUploadProgress(progressElement, fileInfo) {
+    const progressBar = progressElement.querySelector('.bg-blue-600');
+    const progressText = progressElement.querySelector('.text-blue-600.font-medium');
+    
+    let progress = 0;
+    const interval = setInterval(() => {
+        progress += Math.random() * 15 + 5; // Incremento aleatório entre 5-20%
+        
+        if (progress >= 100) {
+            progress = 100;
+            clearInterval(interval);
+            
+            // Simula conclusão do upload
+            setTimeout(() => {
+                // Remove o elemento de progresso
+                progressElement.remove();
+                
+                // Adiciona o documento como concluído
+                const completedFileInfo = {
+                    ...fileInfo,
+                    cdnUrl: fileInfo.cdnUrl || `local://${fileInfo.uuid}`,
+                    isLocal: true
+                };
+                
+                addUploadedDocument(completedFileInfo);
+            }, 500);
+        }
+        
+        // Atualiza a barra de progresso
+        progressBar.style.width = `${progress}%`;
+        progressText.textContent = `${Math.round(progress)}%`;
+    }, 200);
 }
 
 function removeUploadedDocument(fileId) {
     const element = document.querySelector(`[data-file-id="${fileId}"]`);
-    if (element) {
+    if (!element) {
+        console.log('Elemento não encontrado para remoção:', fileId);
+        return;
+    }
+    
+    // Verifica se é um arquivo local
+    const statusElement = element.querySelector('.text-xs.text-blue-600');
+    const isLocal = statusElement && statusElement.textContent.includes('local');
+    
+    // Confirma a remoção
+    const fileName = element.querySelector('.font-medium').textContent;
+    const confirmMessage = `Tem certeza que deseja remover "${fileName}"?`;
+    
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+    
+    try {
+        // Remove o elemento do DOM
         element.remove();
-        showNotification('Documento removido', 'info');
+        
+        // Se for um arquivo local, libera a URL do objeto
+        if (isLocal) {
+            // Para arquivos locais, não precisamos fazer nada especial
+            // O garbage collector do JavaScript cuidará da limpeza
+            console.log('Arquivo local removido:', fileName);
+        } else {
+            // Para arquivos remotos, logamos a remoção
+            console.log('Arquivo remoto removido:', fileName);
+        }
+        
+        showNotification(`Documento "${fileName}" removido com sucesso!`, 'success');
+        
+    } catch (error) {
+        console.error('Erro ao remover documento:', error);
+        showNotification('Erro ao remover documento', 'error');
     }
 }
 
@@ -1011,23 +1178,50 @@ function getUploadedDocuments() {
     
     documentElements.forEach(element => {
         const fileId = element.getAttribute('data-file-id');
-        const fileName = element.querySelector('.font-medium').textContent;
-        const fileInfo = element.querySelector('.text-xs').textContent;
+        const fileNameElement = element.querySelector('.font-medium');
+        const fileInfoElement = element.querySelector('.text-xs:not(.text-green-600):not(.text-blue-600)');
+        const statusElement = element.querySelector('.text-xs.text-green-600, .text-xs.text-blue-600');
+        
+        if (!fileNameElement) return;
+        
+        const fileName = fileNameElement.textContent;
+        const fileInfo = fileInfoElement ? fileInfoElement.textContent : '';
+        const isLocal = statusElement && statusElement.textContent.includes('local');
         
         // Extrai informações do arquivo (tamanho e tipo)
-        const fileSizeMatch = fileInfo.match(/(\d+\.?\d*\s+\w+)/);
-        const fileTypeMatch = fileInfo.match(/•\s*(.+)$/);
+        let fileSize = 'N/A';
+        let fileType = 'Arquivo';
+        
+        if (fileInfo) {
+            const fileSizeMatch = fileInfo.match(/(\d+\.?\d*\s+\w+)/);
+            const fileTypeMatch = fileInfo.match(/•\s*(.+)$/);
+            
+            if (fileSizeMatch) fileSize = fileSizeMatch[1];
+            if (fileTypeMatch) fileType = fileTypeMatch[1];
+        }
+        
+        // Determina a URL baseada no tipo de arquivo
+        let cdnUrl = '';
+        if (isLocal) {
+            // Para arquivos locais, usa a URL do objeto criada pelo URL.createObjectURL
+            cdnUrl = `local://${fileId}`;
+        } else {
+            // Para arquivos remotos, usa a URL do CDN do Uploadcare
+            cdnUrl = `https://ucarecdn.com/${fileId}/`;
+        }
         
         documents.push({
             uuid: fileId,
             name: fileName,
-            size: fileSizeMatch ? fileSizeMatch[1] : 'N/A',
-            type: fileTypeMatch ? fileTypeMatch[1] : 'Arquivo',
-            cdn_url: `https://ucarecdn.com/${fileId}/`,
-            uploaded_at: new Date().toISOString()
+            size: fileSize,
+            type: fileType,
+            cdn_url: cdnUrl,
+            uploaded_at: new Date().toISOString(),
+            isLocal: isLocal
         });
     });
     
+    console.log('Documentos coletados:', documents);
     return documents;
 }
 
@@ -1035,24 +1229,57 @@ function renderUploadedDocuments(documents) {
     const container = document.getElementById('uploaded-documents');
     container.innerHTML = '';
     
+    if (!documents || documents.length === 0) {
+        return;
+    }
+    
     documents.forEach(doc => {
+        // Determina o ícone baseado no tipo de arquivo
+        let fileIcon = 'fa-file-alt';
+        let iconColor = 'text-blue-600';
+        
+        if (doc.type) {
+            if (doc.type.startsWith('image/') || doc.type.includes('image')) {
+                fileIcon = 'fa-image';
+                iconColor = 'text-green-600';
+            } else if (doc.type.includes('pdf')) {
+                fileIcon = 'fa-file-pdf';
+                iconColor = 'text-red-600';
+            } else if (doc.type.includes('word') || doc.type.includes('document')) {
+                fileIcon = 'fa-file-word';
+                iconColor = 'text-blue-600';
+            } else if (doc.type.includes('excel') || doc.type.includes('spreadsheet')) {
+                fileIcon = 'fa-file-excel';
+                iconColor = 'text-green-600';
+            }
+        }
+        
+        // Determina o status do arquivo
+        let statusText = '✓ Documento salvo';
+        let statusColor = 'text-green-600';
+        
+        if (doc.isLocal) {
+            statusText = '📁 Arquivo local';
+            statusColor = 'text-blue-600';
+        }
+        
         const documentElement = document.createElement('div');
         documentElement.className = 'flex items-center justify-between p-3 bg-gray-50 rounded-lg border';
         documentElement.setAttribute('data-file-id', doc.uuid || doc.name);
         documentElement.innerHTML = `
             <div class="flex items-center space-x-3">
-                <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <i class="fas fa-file-alt text-blue-600"></i>
+                <div class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center">
+                    <i class="fas ${fileIcon} ${iconColor}"></i>
                 </div>
-                <div>
-                    <div class="font-medium text-gray-900 text-sm">${doc.name}</div>
+                <div class="flex-1 min-w-0">
+                    <div class="font-medium text-gray-900 text-sm truncate">${doc.name}</div>
                     <div class="text-xs text-gray-500">
                         ${doc.size && doc.size !== 'N/A' ? `${doc.size} • ` : ''}Enviado em: ${formatDate(doc.uploaded_at)}
                     </div>
-                    <div class="text-xs text-green-600">✓ Documento salvo</div>
+                    <div class="text-xs ${statusColor}">${statusText}</div>
                 </div>
             </div>
-            <button type="button" onclick="removeUploadedDocument('${doc.uuid || doc.name}')" class="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50">
+            <button type="button" onclick="removeUploadedDocument('${doc.uuid || doc.name}')" class="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 ml-2 flex-shrink-0">
                 <i class="fas fa-times"></i>
             </button>
         `;
@@ -1288,3 +1515,75 @@ document.addEventListener('DOMContentLoaded', function() {
         addInteractiveFeatures();
     }, 1000);
 }); 
+
+function initializeUploadcare() {
+    // Verifica se o Uploadcare está disponível
+    if (typeof uploadcare === 'undefined') {
+        console.warn('Uploadcare não está disponível. Usando fallback nativo.');
+        return;
+    }
+    
+    try {
+        // Inicializa o widget do Uploadcare
+        const inputElement = document.querySelector('[role="uploadcare-uploader"]');
+        if (inputElement) {
+            const widget = uploadcare.Widget(inputElement);
+            
+            // Configura o widget globalmente
+            widget.onChange(function(fileInfo) {
+                if (fileInfo) {
+                    console.log('Uploadcare: arquivo selecionado:', fileInfo);
+                    
+                    if (fileInfo.cdnUrl) {
+                        // Arquivo já foi enviado
+                        addUploadedDocument(fileInfo);
+                    } else {
+                        // Arquivo está sendo enviado
+                        showUploadProgress(fileInfo);
+                        
+                        // Monitora o progresso do upload
+                        fileInfo.progress(function(info) {
+                            console.log('Uploadcare: progresso:', info);
+                            if (info.state === 'complete') {
+                                // Upload concluído
+                                addUploadedDocument(fileInfo);
+                            }
+                        });
+                    }
+                }
+            });
+            
+            console.log('Uploadcare inicializado com sucesso');
+        } else {
+            console.warn('Elemento de upload não encontrado para inicialização do Uploadcare');
+        }
+    } catch (error) {
+        console.error('Erro ao inicializar Uploadcare:', error);
+    }
+} 
+
+// Função para limpar arquivos locais e liberar memória
+function cleanupLocalFiles() {
+    const localFileElements = document.querySelectorAll('[data-file-id^="local_"]');
+    localFileElements.forEach(element => {
+        const fileId = element.getAttribute('data-file-id');
+        console.log('Limpando arquivo local:', fileId);
+        element.remove();
+    });
+    
+    // Força a coleta de lixo para liberar URLs de objetos
+    if (window.gc) {
+        window.gc();
+    }
+}
+
+// Função para limpar todos os documentos quando o modal é fechado
+function clearUploadedDocuments() {
+    const container = document.getElementById('uploaded-documents');
+    if (container) {
+        container.innerHTML = '';
+    }
+    
+    // Limpa arquivos locais
+    cleanupLocalFiles();
+} 
