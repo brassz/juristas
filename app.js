@@ -1088,12 +1088,60 @@ function showUploadProgress(fileInfo) {
     
     documentsContainer.appendChild(progressElement);
     
-    // Simula progresso do upload (para arquivos locais)
+    // Para arquivos locais, simula o progresso
     if (fileInfo.isLocal) {
         simulateUploadProgress(progressElement, fileInfo);
+    } else {
+        // Para arquivos do Uploadcare, monitora o progresso real
+        monitorUploadcareProgress(progressElement, fileInfo);
     }
     
     console.log('Progresso de upload iniciado para:', fileInfo.name);
+}
+
+// Função para monitorar progresso real do Uploadcare
+function monitorUploadcareProgress(progressElement, fileInfo) {
+    const progressBar = progressElement.querySelector('.bg-blue-600');
+    const progressText = progressElement.querySelector('.text-blue-600.font-medium');
+    
+    // Timeout de segurança para evitar que fique infinitamente em progresso
+    const safetyTimeout = setTimeout(() => {
+        console.warn('Timeout de segurança para upload:', fileInfo.name);
+        // Remove o progresso e adiciona o documento como concluído
+        progressElement.remove();
+        addUploadedDocument(fileInfo);
+    }, 30000); // 30 segundos de timeout
+    
+    // Monitora o progresso do Uploadcare
+    if (fileInfo.progress && typeof fileInfo.progress === 'function') {
+        fileInfo.progress(function(info) {
+            console.log('Uploadcare: progresso:', info);
+            
+            if (info.state === 'complete') {
+                clearTimeout(safetyTimeout);
+                // Upload concluído
+                progressElement.remove();
+                addUploadedDocument(fileInfo);
+            } else if (info.state === 'error') {
+                clearTimeout(safetyTimeout);
+                // Erro no upload
+                progressElement.remove();
+                showNotification(`Erro no upload de ${fileInfo.name}`, 'error');
+            } else if (info.progress !== undefined) {
+                // Atualiza a barra de progresso
+                const progress = Math.round(info.progress * 100);
+                progressBar.style.width = `${progress}%`;
+                progressText.textContent = `${progress}%`;
+            }
+        });
+    } else {
+        // Se não tem função de progresso, assume que é um arquivo já enviado
+        setTimeout(() => {
+            clearTimeout(safetyTimeout);
+            progressElement.remove();
+            addUploadedDocument(fileInfo);
+        }, 1000);
+    }
 }
 
 // Função para simular progresso de upload para arquivos locais
